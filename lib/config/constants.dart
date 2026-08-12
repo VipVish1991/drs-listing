@@ -43,13 +43,19 @@ class AppConstants {
   // must match the BOOKING_SHARED_SECRET env var set on the deployed
   // Edge Function, e.g.: supabase secrets set BOOKING_SHARED_SECRET=<value>
   //
-  // Live static host serving the drsListing-web site (booking.html + the
-  // /book/* path). GitHub Pages has no server-side rewrites, so 404.html
-  // (a copy of booking.html) serves the /book/<placeId> QR links with the
-  // URL intact — booking.html reads the placeId from the segment after
-  // 'book', which works at the /drsListing-web/ base path. Every push to
-  // main deploys via .github/workflows/pages.yml (Settings → Pages →
-  // Source: GitHub Actions must be enabled once).
+  // Live static host serving the drsListing-web site. Every push to main
+  // deploys via .github/workflows/pages.yml (Settings → Pages → Source:
+  // GitHub Actions must be enabled once).
+  //
+  // Booking URLs point at the REAL static file (booking.html) with the
+  // placeId as a ?doctor= query param — GitHub Pages has no server-side
+  // rewrites, so the pretty /book/<placeId> path has no backing file and
+  // would be served through 404.html with an HTTP 404 status (crawlers
+  // treat that as missing). booking.html?doctor=<placeId> is a real file
+  // → HTTP 200, and booking.html reads the doctor id from the query
+  // string. The old /book/<placeId> QR links still render (404.html
+  // fallback parses the path segment), so already-printed QRs keep
+  // working.
   static const String bookingHost = 'https://VipVish1991.github.io/drsListing-web';
   static const String bookingSharedSecret = 'cAZrwHpDFJ4HaSNXowJnmvzi-0YD5rYE';
 
@@ -66,9 +72,15 @@ class AppConstants {
   static String get notifyFunctionUrl =>
       '$supabaseUrl/functions/v1/notifications';
   static String bookingPageUrl(String placeId, {String? doctorName}) {
+    // booking.html is a REAL static file on GitHub Pages (returns HTTP 200
+    // to crawlers), with the placeId passed as ?doctor= — the booking page
+    // reads it from the query string. This replaced the pretty
+    // /book/<placeId> path, which GitHub Pages serves via 404.html with an
+    // HTTP 404 status (no server-side rewrites on Pages).
     final buffer = StringBuffer(
-      '$bookingHost/book/${Uri.encodeComponent(placeId)}'
-      '?token=$bookingSharedSecret',
+      '$bookingHost/booking.html'
+      '?doctor=${Uri.encodeComponent(placeId)}'
+      '&token=$bookingSharedSecret',
     );
     if (doctorName != null && doctorName.isNotEmpty) {
       buffer.write('&name=${Uri.encodeComponent(doctorName)}');

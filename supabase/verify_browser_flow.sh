@@ -11,9 +11,11 @@
 #      must make index.html's query-preservation script rewrite the
 #      "Open Booking Page" button href to /booking?token=... (so the
 #      form opens pre-authorized).
-#   3. /book/ form      — https://<bookingHost>/book/<placeId>?token=...
+#   3. booking.html form — https://<bookingHost>/booking.html?doctor=<id>&token=...
 #      renders the booking form (title "Book with <name>", form visible,
-#      NOT the fail-closed "invalid link" message).
+#      NOT the fail-closed "invalid link" message) and responds HTTP 200
+#      (a real static file — the old /book/<placeId> path returns 404 via
+#      Pages' 404.html fallback, which crawlers treat as missing).
 #
 # The POST booking chain (book → confirm Pending → clean up) is covered
 # by preflight_qr_flow.sh — pass --with-post to run it after these
@@ -187,19 +189,23 @@ fi
 
 # ── 3. /book/ form renders visible for a valid QR link ──────────────
 echo ""
-echo "[3/4] /book/ form renders (visible, not fail-closed)..."
-BOOK_URL="${BOOKING_HOST}/book/${DOCTOR_ENC}?token=${BOOKING_SECRET}&name=${NAME_ENC}"
+echo "[3/4] booking.html form renders (HTTP 200, visible, not fail-closed)..."
+BOOK_URL="${BOOKING_HOST}/booking.html?doctor=${DOCTOR_ENC}&token=${BOOKING_SECRET}&name=${NAME_ENC}"
+# The whole point of the booking.html URL: it is a REAL file, so Pages
+# answers 200 (the /book/<placeId> path would answer 404 via 404.html).
+BOOK_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 20 -H "User-Agent: ${UA}" "${BOOK_URL}")"
 dump_dom "${BOOK_URL}" "${DOM_TMP}/book.html"
 TITLE="$(grep -oE 'Book with [^<]*' "${DOM_TMP}/book.html" | head -1)"
 FORM_TAG="$(grep -oE '<form[^>]*id="bookingForm"[^>]*>' "${DOM_TMP}/book.html" | head -1)"
 FIELDS="$(grep -c -E 'Full Name|Mobile Number|Book Appointment' "${DOM_TMP}/book.html")"
+echo "  status: ${BOOK_STATUS} (must be 200)"
 echo "  title:  ${TITLE:-<none>}"
 echo "  form:   ${FORM_TAG:-<none>}"
 echo "  fields: ${FIELDS} / 3 required markers"
-if [[ "${TITLE}" == *"Book with ${TEST_NAME}"* && "${FORM_TAG}" != *"display: none"* && "${FIELDS}" -ge 3 ]]; then
-  PASS "booking form visible with title '${TITLE}' and all fields"
+if [[ "${BOOK_STATUS}" == "200" && "${TITLE}" == *"Book with ${TEST_NAME}"* && "${FORM_TAG}" != *"display: none"* && "${FIELDS}" -ge 3 ]]; then
+  PASS "booking form visible with HTTP 200 + title '${TITLE}' and all fields"
 else
-  FAIL "booking form not rendered correctly (title/form/fields check)"
+  FAIL "booking form not rendered with 200 (status=${BOOK_STATUS:-none}; title/form/fields check)"
 fi
 
 # ── 4. Modern UI markers (Download App header, date strip, history) ──
@@ -232,4 +238,4 @@ if [[ "${FAILED}" == 1 ]]; then
   echo "BROWSER VERIFICATION FAILED — fix the failing step, then re-run."
   exit 1
 fi
-echo "BROWSER VERIFICATION PASSED — landing page, token preservation and /book/ form all render correctly in real Chrome."
+echo "BROWSER VERIFICATION PASSED — landing page, token preservation and booking.html (HTTP 200) all render correctly in real Chrome."

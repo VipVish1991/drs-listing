@@ -4,8 +4,10 @@
 #
 # Verifies the whole QR → booking chain after every deploy:
 #
-#   1. Static booking page  — https://<bookingHost>/book/<placeId>?token=…
-#      must serve booking.html (the page the QR code encodes).
+#   1. Static booking page  — https://<bookingHost>/booking.html?doctor=<placeId>&token=…
+#      must serve the REAL booking.html file with HTTP 200 (the page the
+#      QR code encodes). The old /book/<placeId> path returns 404 via
+#      GitHub Pages' 404.html fallback and must no longer be used by QRs.
 #   2. Edge Function GET    — …/functions/v1/booking-page?doctor=<placeId>
 #      must return the legacy HTML form (token gate passes).
 #   3. Edge Function GET action=slots — the new availability JSON the web
@@ -172,13 +174,15 @@ if [[ -z "${BOOKING_HOST}" || "${BOOKING_HOST}" == *"REPLACE-WITH"* ]]; then
   echo "        The static-page half of the QR chain can't be verified yet."
   STATIC_SKIPPED=1
 else
-  STATIC_URL="${BOOKING_HOST}/book/${DOCTOR_ENC}?token=${BOOKING_SECRET}"
-  BODY="$(curl -s -L --max-time 20 -H "User-Agent: ${UA}" "${STATIC_URL}")"
-  if [[ -n "${BODY}" && "${BODY}" == *"Book an Appointment"* ]]; then
-    PASS "static page serves booking.html at /book/<placeId>"
+  STATIC_URL="${BOOKING_HOST}/booking.html?doctor=${DOCTOR_ENC}&token=${BOOKING_SECRET}"
+  STATIC_CODE="$(curl -s -o /tmp/preflight_static_body.html -w '%{http_code}' -L --max-time 20 -H "User-Agent: ${UA}" "${STATIC_URL}")"
+  BODY="$(cat /tmp/preflight_static_body.html 2>/dev/null)"
+  if [[ "${STATIC_CODE}" == "200" && -n "${BODY}" && "${BODY}" == *"Book an Appointment"* ]]; then
+    PASS "static page serves booking.html with HTTP 200 (${STATIC_URL})"
   else
-    FAIL "static page did not render (got $(printf '%s' "${BODY}" | head -c 80))"
+    FAIL "static page did not render with 200 (status ${STATIC_CODE:-none}; got $(printf '%s' "${BODY}" | head -c 80))"
   fi
+  rm -f /tmp/preflight_static_body.html
 fi
 
 # ── 2. Edge Function GET (legacy HTML form — token gate) ────────────
