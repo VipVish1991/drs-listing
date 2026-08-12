@@ -1,0 +1,16 @@
+# ============================================================================
+# DrsListing — Supabase CLI configuration
+# Project ref: qxukzqdsmlurollltrjp (from AppConstants.supabaseUrl)
+# ============================================================================
+
+project_id = "qxukzqdsmlurollltrjp"
+
+[api]
+enabled = true
+
+# The booking page is opened directly in a browser (patient scans the QR
+# code) and submits via fetch — neither sends a JWT Authorization header.
+# Edge Functions default to verify_jwt = true, which would 401 every
+# request before the function runs, so this must be disabled.
+[functions.booking-page]
+verify_jwt = false

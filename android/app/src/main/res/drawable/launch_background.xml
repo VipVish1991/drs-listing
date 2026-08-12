@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Native splash screen shown before Flutter renders its first frame.
+     Plain warm beige background (no icon) matching AppColors.bgMain (#F7F2E8).
+     The icon layer was removed because it caused a resource-not-found crash
+     on API 26+ when the adaptive icon foreground was missing. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_background" />
+</layer-list>

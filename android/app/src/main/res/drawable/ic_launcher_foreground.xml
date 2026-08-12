@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Minimal foreground for the adaptive app launcher icon.
+     This prevents a Resources.NotFoundException crash on API 26+
+     when the system resolves @mipmap/ic_launcher (which references
+     @drawable/ic_launcher_foreground via mipmap-anydpi-v26/ic_launcher.xml). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple circle using the app's primary pink (#D63384) -->
+    <path
+        android:fillColor="#D63384"
+        android:pathData="M54,54m-26,0a26,26 0,1 1,52 0a26,26 0,1 1,-52 0" />
+    <!-- Medical cross symbol -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,36L54,36c2,0 3.6,1.6 3.6,3.6v10.8h10.8c2,0 3.6,1.6 3.6,3.6v0c0,2 -1.6,3.6 -3.6,3.6H57.6v10.8c0,2 -1.6,3.6 -3.6,3.6v0c-2,0 -3.6,-1.6 -3.6,-3.6V57.6H39.6c-2,0 -3.6,-1.6 -3.6,-3.6v0c0,-2 1.6,-3.6 3.6,-3.6h10.8V39.6C50.4,37.6 52,36 54,36z" />
+</vector>

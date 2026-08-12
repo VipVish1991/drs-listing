@@ -1,0 +1,277 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'network_settings_service.dart';
+import 'web_connectivity_init_stub.dart'
+    if (dart.library.js) 'web_connectivity_init.dart';
+
+/// App-wide root [ScaffoldMessenger] key — attached to the [GetMaterialApp]
+/// in `lib/app.dart` so [ConnectivityService] can show/hide the offline
+/// banner from anywhere without a BuildContext.
+final GlobalKey<ScaffoldMessengerState> appScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
+/// Watches the device's network connectivity and surfaces a persistent
+/// **"No internet connection"** banner while the app is offline.
+///
+/// "Offline" means **no internet access** — not just "no network
+/// interface". `connectivity_plus` reports a Wi‑Fi connection to a router
+/// without internet as simply `wifi` (online), so the service additionally
+/// probes a reliable endpoint ([probeUrl]) while any interface exists.
+/// That catches the router-down / captive-portal case that a pure
+/// interface check misses — for the banner AND the home connectivity
+/// status card (both driven by [online]).
+///
+/// The banner appears as soon as the connection (or reachability) drops
+/// and disappears automatically when it returns — no action needed from
+/// the user. Listening starts once (from `main()`) and runs for the app's
+/// whole lifetime.
+class ConnectivityService with WidgetsBindingObserver {
+  ConnectivityService._();
+
+  static final ConnectivityService instance = ConnectivityService._();
+
+  /// Endpoint that answers quickly with a tiny 204 response, designed for
+  /// exactly this kind of reachability check (no body to download).
+  static const String probeUrl = 'https://www.gstatic.com/generate_204';
+
+  /// How often reachability is re-probed while a network interface exists.
+  static const Duration probeInterval = Duration(seconds: 10);
+
+  final Connectivity _connectivity = Connectivity();
+  StreamSubscription<List<ConnectivityResult>>? _subscription;
+  bool _offlineBannerVisible = false;
+  bool _internetReachable = true;
+  bool _probing = false;
+  Timer? _probeTimer;
+
+  /// Whether any network interface is currently up (wifi/mobile). Drives
+  /// the probe timer and gates probe results — a stale probe finishing
+  /// after the interface vanished must never flip the state online.
+  bool _hasInterface = false;
+
+  /// True while the app is backgrounded — probing is paused then (the
+  /// banner/card aren't visible, and background network traffic is
+  /// wasteful).
+  bool _appBackgrounded = false;
+
+  /// The http client used for probes — created lazily and reused for the
+  /// app's whole lifetime (never one-per-probe). Tests replace it with a
+  /// mock via [probeHttpClient].
+  http.Client? _probeClient;
+
+  /// Public online/offline state — true when the device has **internet
+  /// access** (a network interface AND a successful reachability probe).
+  /// Widgets (e.g. the home connectivity status card) listen to this
+  /// instead of subscribing to the plugin again. Starts optimistic
+  /// (online) until the first check + probe resolve.
+  final ValueNotifier<bool> online = ValueNotifier<bool>(true);
+
+  /// Last known offline state while no Scaffold was mounted (e.g. the
+  /// initial check racing the first frame). Applied on the next event so
+  /// the banner isn't silently dropped.
+  bool? _pendingOffline;
+
+  /// Test hook — inject a fake http client so reachability probes can be
+  /// exercised without real network traffic.
+  @visibleForTesting
+  set probeHttpClient(http.Client? client) => _probeClient = client;
+
+  /// Test hook — runs one reachability probe immediately (bypasses the
+  /// periodic timer so tests don't need to wait 10s).
+  @visibleForTesting
+  Future<void> runReachabilityProbe() => _probe();
+
+  /// Test hook — resets the probe + banner bookkeeping between tests so
+  /// a test that flips reachability can't leak its state (timer, client,
+  /// pending-offline flag, banner visibility) into the next test.
+  @visibleForTesting
+  void resetReachabilityForTest() {
+    _probeTimer?.cancel();
+    _probeTimer = null;
+    _probeClient = null;
+    _internetReachable = true;
+    _probing = false;
+    _hasInterface = false;
+    _appBackgrounded = false;
+    _pendingOffline = null;
+    _offlineBannerVisible = false;
+  }
+
+  /// Starts listening for connectivity changes, performs an initial check
+  /// (e.g. the app was launched while offline) and begins reachability
+  /// probing while any network interface exists. Safe to call once.
+  void start() {
+    if (_subscription != null) return;
+
+    // Pause probing when the app is backgrounded (the banner/card aren't
+    // visible and background requests are wasteful).
+    WidgetsBinding.instance.addObserver(this);
+
+    // On web, the autogenerated web_plugin_registrant.dart is tree-shaken
+    // in release mode, so the HTML connectivity plugin must be registered
+    // manually for navigator.onLine / offline events to work correctly.
+    ensureWebConnectivityPlatform();
+
+    _subscription = _connectivity.onConnectivityChanged.listen((results) {
+      _updateBanner(_isOnline(results));
+      _syncProbe(results);
+    });
+    // Initial state — resolved a moment after the first frame, by which
+    // time the app's first Scaffold is registered on the messenger key.
+    _connectivity
+        .checkConnectivity()
+        .then((results) {
+          _updateBanner(_isOnline(results));
+          _syncProbe(results);
+        })
+        .catchError((_) {
+      // Plugin unavailable (tests / unsupported platform) — no banner.
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final backgrounded = state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden;
+    if (backgrounded == _appBackgrounded) return;
+    _appBackgrounded = backgrounded;
+    if (backgrounded) {
+      _probeTimer?.cancel();
+      _probeTimer = null;
+    } else if (_hasInterface) {
+      // Back in the foreground with a network interface — resume probing.
+      _probeTimer ??= Timer.periodic(probeInterval, (_) => _probe());
+      _probe();
+    }
+  }
+
+  static bool _isOnline(List<ConnectivityResult> results) =>
+      results.any((r) => r != ConnectivityResult.none);
+
+  /// Test hook — lets widget tests toggle connectivity without the
+  /// platform plugin. Mirrors a connectivity event fully, including the
+  /// interface state that gates probe results.
+  @visibleForTesting
+  void applyResult(bool isOnline) {
+    _hasInterface = isOnline;
+    _updateBanner(isOnline);
+  }
+
+  /// Starts/stops the periodic reachability probe based on whether any
+  /// network interface exists. While an interface is up, "offline" is a
+  /// reachability question — a Wi‑Fi router without internet still shows
+  /// as `wifi` to connectivity_plus, so the probe is what detects it.
+  void _syncProbe(List<ConnectivityResult> results) {
+    _hasInterface = _isOnline(results);
+    if (_hasInterface && !_appBackgrounded) {
+      _probeTimer ??= Timer.periodic(probeInterval, (_) => _probe());
+      _probe();
+    } else {
+      _probeTimer?.cancel();
+      _probeTimer = null;
+    }
+  }
+
+  /// One reachability probe against [probeUrl]. On success/failure the
+  /// online state (and with it the banner + [online] notifier) is updated
+  /// only when the answer CHANGED, so steady-state probing is a no-op.
+  ///
+  /// A probe that finishes AFTER the network interface disappeared must
+  /// not flip the state back online — the definitive "no interface" state
+  /// wins, so stale results are discarded via [_hasInterface].
+  Future<void> _probe() async {
+    if (_probing) return;
+    _probing = true;
+    var reachable = false;
+    try {
+      final client = _probeClient ??= http.Client();
+      final response = await client
+          .get(Uri.parse(probeUrl))
+          .timeout(const Duration(seconds: 4));
+      reachable = response.statusCode >= 200 && response.statusCode < 400;
+    } catch (_) {
+      reachable = false;
+    } finally {
+      _probing = false;
+    }
+    // Stale result guard: the interface state is authoritative.
+    if (!_hasInterface) return;
+    if (reachable != _internetReachable) {
+      _internetReachable = reachable;
+      _updateBanner(reachable);
+    }
+  }
+
+  void _updateBanner(bool isOnline) {
+    final messenger = appScaffoldMessengerKey.currentState;
+    if (messenger == null) {
+      // No Scaffold registered yet (app just started) — remember the
+      // state so the next connectivity event shows/hides the banner
+      // correctly instead of dropping it. The notifier still reflects the
+      // raw state so widgets are never left in the dark.
+      _pendingOffline = !isOnline;
+      online.value = isOnline;
+      return;
+    }
+    // A messenger is present — a pending offline state (e.g. from the
+    // initial check) now becomes actionable.
+    if (_pendingOffline != null) {
+      isOnline = !_pendingOffline!;
+      _pendingOffline = null;
+    }
+    // Reflect the RESOLVED state so the banner and the widgets listening
+    // to [online] never disagree.
+    online.value = isOnline;
+
+    if (!isOnline) {
+      if (_offlineBannerVisible) return;
+      _offlineBannerVisible = true;
+      messenger.showMaterialBanner(
+        MaterialBanner(
+          backgroundColor: const Color(0xFF20242B),
+          leading: const Icon(
+            Icons.wifi_off_rounded,
+            color: Colors.orangeAccent,
+          ),
+          content: const Text(
+            'No internet connection. Please check your network.',
+            style: TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
+          ),
+          actions: [
+            // Opens the Android Wi‑Fi / network settings so the user can
+            // re-enable their internet connection. No‑op on other platforms.
+            TextButton(
+              onPressed: () => NetworkSettingsService.openWifiSettings(),
+              child: const Text(
+                'Settings',
+                style: TextStyle(color: Colors.orangeAccent),
+              ),
+            ),
+            // Retry re-probes the network + reachability; the banner also
+            // hides on its own as soon as an event/probe reports online.
+            TextButton(
+              onPressed: () async {
+                final results = await _connectivity
+                    .checkConnectivity()
+                    .catchError((_) => const <ConnectivityResult>[]);
+                _updateBanner(_isOnline(results));
+                _syncProbe(results);
+              },
+              child: const Text(
+                'Retry',
+                style: TextStyle(color: Colors.orangeAccent),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      if (!_offlineBannerVisible) return;
+      _offlineBannerVisible = false;
+      messenger.hideCurrentMaterialBanner();
+    }
+  }
+}

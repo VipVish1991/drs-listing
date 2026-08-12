@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Google Maps API Key for debug builds.
+
+  For release builds, update this value with your production key.
+  The key is also loaded in .env at runtime for the Places API.
+  See: https://console.cloud.google.com/apis/credentials
+-->
+<resources>
+    <string name="google_maps_key" translatable="false">YOUR_GOOGLE_MAPS_API_KEY_HERE</string>
+</resources>

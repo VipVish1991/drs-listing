@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Drs Listing</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>DrsListing</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(FLUTTER_BUILD_NAME)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.drslisting.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>drslisting</string>
+			</array>
+		</dict>
+	</array>
+	<key>GoogleMapsAPIKey</key>
+	<string>$(GOOGLE_MAPS_API_KEY)</string>
+	<!-- UPI payment apps (flutter_upi_india): iOS requires declaring the
+	     custom URL schemes the app may open, otherwise canOpenURL fails and
+	     the UPI app list comes back empty. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>gpay</string>
+		<string>phonepe</string>
+		<string>paytm</string>
+		<string>upi</string>
+		<string>tez</string>
+		<string>bhim</string>
+		<!-- Offline banner → Settings > Wi-Fi (see
+		     NetworkSettingsService): the App-Prefs:root=WIFI URL scheme must
+		     be declared or canOpenURL/canLaunchUrl rejects it. Both
+		     spellings are listed — Dart's Uri lowercases the scheme, and
+		     iOS matches case-insensitively, but the double entry costs
+		     nothing. Apple doesn't guarantee the scheme; when rejected the
+		     call is a silent no-op. -->
+		<string>App-Prefs</string>
+		<string>app-prefs</string>
+	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>DrsListing needs your location to find nearby doctors, hospitals, and healthcare providers for you.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>DrsListing needs your location to find nearby doctors, hospitals, and healthcare providers for you.</string>
+</dict>
+</plist>

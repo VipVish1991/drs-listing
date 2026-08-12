@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme applied to the Android Window while the process is starting
+         when the OS's Dark Mode setting is on -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <!-- Show a splash screen on the activity. Automatically removed when
+             the Flutter engine draws its first frame -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <!-- The native splash is the warm beige splash_background even in
+             dark mode, so dark (black) status-bar icons stay legible. -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@color/splash_background</item>
+    </style>
+    <!-- Theme applied to the Android Window as soon as the process has started.
+         This theme determines the color of the Android Window while your
+         Flutter UI initializes, as well as behind your Flutter UI while its
+         running.
+
+         Using @color/splash_background instead of ?android:colorBackground so
+         the window matches the app's warm beige theme, eliminating the black
+         flash between the native splash and the Flutter splash screen. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@color/splash_background</item>
+    </style>
+</resources>

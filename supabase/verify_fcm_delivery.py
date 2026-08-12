@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""
+DrsListing — End-to-end FCM delivery verification for push notifications.
+
+Proves the REAL Firebase push chain works against the LIVE notifications
+Edge Function — the missing piece until FIREBASE_SERVICE_ACCOUNT is set.
+
+What it verifies (server-side end-to-end, no device needed):
+
+  1. .env.deploy contains a valid FIREBASE_SERVICE_ACCOUNT (fails fast with
+     instructions if not — nothing else can be proven without it).
+  2. The live function is reachable and the NOTIFY_SHARED_SECRET gate matches
+     (bad token -> 401, good token -> 200).
+  3. A REAL push is attempted: creates isolated probe doctor + patient users
+     (marker-guarded), a probe appointment, registers a probe FCM device
+     token, then calls the function exactly like the app does. If the service
+     account is valid, the function mints a Google OAuth2 token from it and
+     calls the FCM HTTP v1 API — returning HTTP 200 with `delivered` instead
+     of HTTP 503. (FCM reports `delivered: 0` because the probe token is not
+     a real device — that is EXPECTED; the point is the send was attempted,
+     which only happens when the service account secret is correctly set.)
+  4. A history row lands in the live `notifications` table for the recipient
+     with the enriched payload (doctor_name, patient_name, date, time).
+  5. All probe rows are deleted afterwards (same safe markers
+     cleanup_test_data.py uses).
+
+Usage:
+    python supabase/verify_fcm_delivery.py            # full chain -> clean up
+    python supabase/verify_fcm_delivery.py --keep     # leave probe rows
+                                                     # (cleanup_test_data.py
+                                                     #  --yes removes them)
+    python supabase/verify_fcm_delivery.py --project-ref <ref>
+
+The SUPABASE_ACCESS_TOKEN and FIREBASE_SERVICE_ACCOUNT are read from
+.env.deploy (recommended) or the environment, like deploy_notifications.py.
+"""
+
+import json
+import os
+import re
+import sys
+import uuid
+import urllib.error
+import urllib.request
+
+# Default target project. Override with --project-ref <ref>.
+PROJECT_REF = "qxukzqdsmlurollltrjp"
+
+DEPLOY_ENV_FILE = ".env.deploy"
+
+# Must match AppConstants.notifySharedSecret in lib/config/constants.dart
+# and the NOTIFY_SHARED_SECRET secret set on the deployed function.
+NOTIFY_SECRET = "n9Kq4Zx7Vm2Lp8Rt5Ys3Cb6Hf1Wj0AeD"
+
+# Probe markers — deliberately the SAME values cleanup_test_data.py matches,
+# so rows left behind (e.g. via --keep) are still caught by that script.
+PROBE_NAME = "Test Patient QA"
+PROBE_ROLE_DOCTOR = "doctor"
+
+
+def load_deploy_env() -> None:
+    """Load KEY=VALUE pairs from .env.deploy into the environment.
+
+    Same lenient semantics as deploy_notifications.py: existing env vars win,
+    quotes stripped, inline comments dropped, and multi-line JSON values are
+    concatenated until they parse (the FIREBASE_SERVICE_ACCOUNT spans lines).
+    """
+    env_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", DEPLOY_ENV_FILE
+    )
+    try:
+        with open(env_path, encoding="utf-8") as f:
+            current_key = None
+            current_value = None
+            for line in f:
+                if current_key is not None:
+                    current_value += "\n" + line.rstrip("\n")
+                    try:
+                        json.loads(current_value)
+                        os.environ[current_key] = current_value
+                        current_key = None
+                        current_value = None
+                    except json.JSONDecodeError:
+                        pass
+                    continue
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or "=" not in stripped:
+                    continue
+                key, _, value = stripped.partition("=")
+                key = key.strip()
+                if not key or key in os.environ:
+                    continue
+                value = value.strip()
+                if " #" in value:
+                    value = value.split(" #", 1)[0].rstrip()
+                if (value.startswith('"') and value.endswith('"')) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
+                    value = value[1:-1]
+                if value.startswith("{"):
+                    current_key = key
+                    current_value = value
+                    try:
+                        json.loads(value)
+                        os.environ[key] = value
+                        current_key = None
+                        current_value = None
+                    except json.JSONDecodeError:
+                        pass
+                else:
+                    os.environ[key] = value
+    except OSError:
+        pass
+
+
+def api(method: str, path: str, body=None):
+    """Call the Supabase Management API and return (status, parsed)."""
+    token = os.environ.get("SUPABASE_ACCESS_TOKEN", "").strip()
+    if not token:
+        sys.exit(
+            "ERROR: SUPABASE_ACCESS_TOKEN is not set.\n"
+            "Create one at https://supabase.com/dashboard/account/tokens, "
+            f"save it in {DEPLOY_ENV_FILE}, or export it and re-run."
+        )
+
+    url = f"https://api.supabase.com/v1/projects/{PROJECT_REF}" + path
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "curl/8.5.0 (DrsListing FCM verify)",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            raw = resp.read().decode()
+            if not raw.strip():
+                return resp.status, None
+            try:
+                return resp.status, json.loads(raw)
+            except json.JSONDecodeError:
+                return resp.status, raw
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode()
+        try:
+            return e.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return e.code, raw
+
+
+def main() -> None:
+    load_deploy_env()
+
+    global PROJECT_REF
+    if "--project-ref" in sys.argv:
+        idx = sys.argv.index("--project-ref")
+        if idx + 1 >= len(sys.argv):
+            sys.exit("ERROR: --project-ref requires a value.")
+        PROJECT_REF = sys.argv[idx + 1]
+    keep = "--keep" in sys.argv
+
+    print("== DrsListing FCM delivery verification ==")
+    print(f"  project ref: {PROJECT_REF}")
+
+    # ── 0. Service account present? ────────────────────────────────
+    service_account = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "").strip()
+    if not service_account:
+        sys.exit(
+            "\n! FIREBASE_SERVICE_ACCOUNT is NOT set — real push delivery cannot "
+            "be verified.\n\n"
+            "Fix:\n"
+            "  1. Firebase Console → Project settings → Service accounts →\n"
+            "     Generate new private key (project: drslisting-ai).\n"
+            "  2. Save the JSON in .env.deploy as FIREBASE_SERVICE_ACCOUNT\n"
+            "     (multi-line is fine).\n"
+            "  3. python supabase/deploy_notifications.py   # sets the secret\n"
+            "  4. Re-run this script.\n"
+        )
+    try:
+        sa = json.loads(service_account)
+        missing = [k for k in ("client_email", "project_id", "private_key") if not sa.get(k)]
+        if missing:
+            sys.exit(f"! FIREBASE_SERVICE_ACCOUNT is missing keys: {missing}")
+        print(f"  -> FIREBASE_SERVICE_ACCOUNT: valid (project {sa['project_id']})")
+    except json.JSONDecodeError:
+        sys.exit("! FIREBASE_SERVICE_ACCOUNT is not valid JSON.")
+
+    # ── 1. Token gate against the live function ────────────────────
+    base = f"https://{PROJECT_REF}.supabase.co/functions/v1/notifications"
+
+    def post(headers, body):
+        req = urllib.request.Request(
+            base,
+            data=json.dumps(body).encode(),
+            method="POST",
+            headers={**headers, "Content-Type": "application/json",
+                     "User-Agent": "curl/8.5.0 (DrsListing FCM verify)"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                return resp.status, resp.read().decode(errors="replace")
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode(errors="replace")
+
+    print("\n[1/4] Token gate...")
+    status, _ = post({"x-notify-token": "wrong-secret"}, {"event": "appointment_booked", "appointment_id": "APT000"})
+    print(f"  -> bad token: HTTP {status} (expected 401)")
+    if status != 401:
+        sys.exit("  ! Token gate failed — deployed NOTIFY_SHARED_SECRET mismatch. Aborting.")
+
+    # ── 2. Probe data (doctor + patient + appointment + device) ────
+    # Everything from here down is inside try/finally so ANY failure — probe
+    # creation included — still cleans up the rows created so far.
+    doc_id = pat_id = place_id = appointment_id = None
+    suffix = uuid.uuid4().hex[:8]
+    try:
+        print("\n[2/4] Creating isolated probe data...")
+        doc_mobile = "9" + str(abs(hash("d" + suffix)) % 9000000000 + 1000000000)
+        pat_mobile = "9" + str(abs(hash("p" + suffix)) % 9000000000 + 1000000000)
+        place_id = "fcm-probe-" + suffix
+        appointment_id = "FCM-PROBE-" + suffix.upper()
+
+        # Doctor user (mobile -> place_id) + device token.
+        status, resp = api("POST", "/database/query", {"query": f"""
+INSERT INTO public.users (id, mobile, name, role, doctor_place_id, device_tokens, notification_prefs)
+VALUES (gen_random_uuid(), '{doc_mobile}', '{PROBE_NAME}', '{PROBE_ROLE_DOCTOR}',
+        '{place_id}', '[{{"token": "fcm-probe-token-{suffix}", "platform": "android"}}]'::jsonb,
+        '{{"appointment_booked": true, "appointment_cancelled": true, "appointment_status_changed": true, "all": true}}'::jsonb)
+RETURNING id::text
+"""})
+        if status not in (200, 201) or not resp:
+            sys.exit(f"  ! Failed to create probe doctor user: {status} {resp}")
+        doc_id = resp[0]["id"]
+
+        status, resp = api("POST", "/database/query", {"query": f"""
+INSERT INTO public.users (id, mobile, name, role, device_tokens, notification_prefs)
+VALUES (gen_random_uuid(), '{pat_mobile}', '{PROBE_NAME}', 'patient', '[]'::jsonb,
+        '{{"appointment_booked": true, "appointment_cancelled": true, "appointment_status_changed": true, "all": true}}'::jsonb)
+RETURNING id::text
+"""})
+        if status not in (200, 201) or not resp:
+            sys.exit(f"  ! Failed to create probe patient user: {status} {resp}")
+        pat_id = resp[0]["id"]
+
+        # Doctor row (doctors table) so isDoctorFor() resolves the mobile.
+        status, resp = api("POST", "/database/query", {"query": f"""
+INSERT INTO public.doctors (place_id, user_id, name)
+VALUES ('{place_id}', '{doc_id}', '{PROBE_NAME}')
+ON CONFLICT (place_id) DO NOTHING
+RETURNING place_id
+"""})
+        print(f"  -> probe doctor + patient + doctor row created (suffix {suffix})")
+
+        # Appointment booked BY the patient for the doctor.
+        status, resp = api("POST", "/database/query", {"query": f"""
+INSERT INTO public.appointments (
+    appointment_id, user_id, patient_name, patient_phone, doctor_name,
+    doctor_place_id, doctor_details, appointment_date, appointment_time, status
+) VALUES (
+    '{appointment_id}', '{pat_id}', '{PROBE_NAME}', '{pat_mobile}', '{PROBE_NAME}',
+    '{place_id}', '{{"place_id": "{place_id}"}}'::jsonb,
+    '2099-01-01', '10:00 AM', 'Pending'
+)
+RETURNING appointment_id
+"""})
+        if status not in (200, 201):
+            sys.exit(f"  ! Failed to create probe appointment: {status} {resp}")
+        print(f"  -> probe appointment {appointment_id} created")
+
+        # ── 3. Real push attempt through the live function ─────────
+        print("\n[3/4] Real push attempt (service-account chain)...")
+        status, body = post(
+            {"x-notify-token": NOTIFY_SECRET, "x-user-mobile": pat_mobile},
+            {"event": "appointment_booked", "appointment_id": appointment_id},
+        )
+        print(f"  -> HTTP {status}: {body[:200]}")
+        if status == 503:
+            print("  !! HTTP 503 — the deployed function has NO FIREBASE_SERVICE_ACCOUNT")
+            print("     secret. Run: python supabase/deploy_notifications.py  and re-run.")
+            sys.exit(1)
+        if status != 200:
+            sys.exit(f"  ! Unexpected response: HTTP {status} {body[:200]}")
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            sys.exit(f"  ! Non-JSON response: {body[:200]}")
+        if parsed.get("ok") is not True:
+            sys.exit(f"  ! Function returned ok:false: {body[:200]}")
+
+        # delivered: 0 is EXPECTED (probe token is not a real device). What
+        # matters is the 200 — it proves the function minted an OAuth2 token
+        # from the service account and called FCM (it would 503 otherwise).
+        print("  -> ok:true, delivered:", parsed.get("delivered"),
+              "(0 expected — probe token is not a real device)")
+
+        # ── 4. History row landed? ─────────────────────────────────
+        print("\n[4/4] History row check...")
+        status, resp = api("POST", "/database/query", {"query": f"""
+SELECT type, title, read, body,
+       data->>'doctor_name' AS doctor_name,
+       data->>'patient_name' AS patient_name,
+       data->>'appointment_date' AS appointment_date
+FROM public.notifications
+WHERE user_id = '{doc_id}' AND data->>'appointment_id' = '{appointment_id}'
+ORDER BY created_at DESC LIMIT 1
+"""})
+        ok_history = (
+            status in (200, 201)
+            and resp
+            and resp[0].get("type") == "appointment_booked"
+            and resp[0].get("doctor_name") == PROBE_NAME
+            and resp[0].get("patient_name") == PROBE_NAME
+            # data payload keeps the ISO key (deep-link routing); the
+            # human-readable BODY must use the app's dd-MM-yyyy format.
+            and resp[0].get("appointment_date") == "2099-01-01"
+            and "01-01-2099" in (resp[0].get("body") or "")
+        )
+        if ok_history:
+            print("  -> history row landed with the enriched payload [OK]")
+            print("  -> body uses dd-MM-yyyy date format [OK]")
+            print("\nSUCCESS: FCM chain verified end-to-end.")
+        else:
+            print(f"  ! History row missing or malformed: {status} {resp}")
+            # Non-zero exit so a deploy/CI wrapper sees the failure.
+            sys.exit("PARTIAL: FCM send ok but history check failed.")
+
+    finally:
+        # ── Cleanup (always) ───────────────────────────────────────
+        if keep:
+            print("\n  --keep set — leaving probe rows for cleanup_test_data.py --yes.")
+            return
+        print("\n  Cleaning up probe rows...")
+        for label, sql in [
+            ("appointments", f"DELETE FROM public.appointments WHERE appointment_id = '{appointment_id}'"),
+            ("doctors", f"DELETE FROM public.doctors WHERE place_id = '{place_id}'"),
+            ("users", f"DELETE FROM public.users WHERE id IN ('{doc_id}', '{pat_id}')"),
+        ]:
+            s, r = api("POST", "/database/query", {"query": sql})
+            print(f"  -> {label}: {s}")
+        # Verify cleanup actually happened (notifications cascade from users).
+        leftover = 0
+        for marker_sql in [
+            f"SELECT COUNT(*) AS n FROM public.users WHERE id IN ('{doc_id}', '{pat_id}')",
+            f"SELECT COUNT(*) AS n FROM public.appointments WHERE appointment_id = '{appointment_id}'",
+            f"SELECT COUNT(*) AS n FROM public.doctors WHERE place_id = '{place_id}'",
+        ]:
+            s, r = api("POST", "/database/query", {"query": marker_sql})
+            try:
+                leftover += r[0]["n"] if r else 0
+            except (TypeError, IndexError, KeyError):
+                pass
+        if leftover == 0:
+            print("  -> cleanup verified: 0 probe rows remain.")
+        else:
+            print(f"  !! {leftover} probe row(s) remain — run cleanup_test_data.py --yes.")
+        print("  Done.")
+
+
+if __name__ == "__main__":
+    main()

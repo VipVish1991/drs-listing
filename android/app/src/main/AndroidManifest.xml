@@ -1,0 +1,143 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Location permissions for geolocator -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Reading the connected Wi-Fi network (SSID / signal strength for the
+         offline status card). The SSID itself additionally needs the
+         location permission above (granted at runtime) on Android 8.1+. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- FCM push notifications (Android 13+ runtime permission; the app
+         requests it via FirebaseMessaging.requestPermission). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Opt out of edge-to-edge so the status bar renders as a solid,
+         opaque black strip (android:statusBarColor from the theme) on
+         API 35+ devices — otherwise the transparent status bar just
+         shows the app's background behind it. -->
+    <!-- Custom Application class (.DrsListingApp): registers the
+         high-importance notification channel on every process start,
+         including when the process is spawned just for a background FCM
+         push — see DrsListingApp.kt. -->
+    <application
+        android:label="DrsListing"
+        android:name=".DrsListingApp"
+        android:icon="@mipmap/ic_launcher"
+        android:windowOptOutEdgeToEdgeEnforcement="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
+            android:enableOnBackInvokedCallback="true">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- Deep link: drslisting://manage-slots/{placeId} -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="drslisting" android:host="manage-slots"/>
+            </intent-filter>
+            <!-- Catch-all for drslisting:// (QR codes with any path) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="drslisting"/>
+            </intent-filter>
+
+            <!-- App Links (https://drslisting.ai/book|manage-slots/{placeId}).
+                 autoVerify requires /.well-known/assetlinks.json to be hosted
+                 on drslisting.ai with this app's SHA-256 fingerprint. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="drslisting.ai" android:pathPrefix="/book"/>
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="drslisting.ai" android:pathPrefix="/manage-slots"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Google Maps API key — required by google_maps_flutter -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="@string/google_maps_key" />
+
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+    <!-- SMS app discovery: Android 11+ package visibility requires an
+         explicit <queries> entry, otherwise canLaunchUrl('sms:…') returns
+         false and the SMS app never opens. Both sms: and smsto: are
+         declared because some devices only resolve one of them. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="sms" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="smsto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="sms" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
+    </queries>
+    <!-- UPI payment apps (upi_india): Android 11+ package visibility
+         requires an explicit <queries> entry for the upi:// intent scheme,
+         otherwise getAllUpiApps() can't see GPay/PhonePe/Paytm and the
+         online-pay option shows no apps. The upi_india plugin also ships
+         its own <queries> declarations, merged in automatically. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="upi" />
+        </intent>
+    </queries>
+</manifest>

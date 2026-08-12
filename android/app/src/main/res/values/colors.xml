@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Warm beige background matching AppColors.bgMain (#F7F2E8) -->
+    <color name="splash_background">#FFF7F2E8</color>
+    <!-- Primary pink matching AppColors.primary (#D63384) -->
+    <color name="splash_primary">#FFD63384</color>
+	<color name="ic_launcher_background">#F7F2E8</color>
+</resources>
