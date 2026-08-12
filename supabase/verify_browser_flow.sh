@@ -124,6 +124,7 @@ echo "Using Chrome: ${CHROME}"
 
 # ── Helpers ─────────────────────────────────────────────────────────
 FAILED=0
+UA="curl/8.5.0 (DrsListing browser verify)"
 PASS() { echo "  -> OK: $1"; }
 FAIL() { echo "  -> FAIL: $1"; FAILED=1; }
 
