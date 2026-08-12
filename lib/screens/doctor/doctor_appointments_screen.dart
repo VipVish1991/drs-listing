@@ -809,7 +809,12 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
               ),
             ],
           ),
-        );
+        )
+            // The "No appointments" / "No results" notice enters with the
+            // same fade + slide family as the rest of the screen.
+            .animate()
+            .fadeIn(duration: 300.ms, curve: Curves.easeOut)
+            .slideY(begin: 0.08, end: 0, duration: 300.ms, curve: Curves.easeOut);
       }
 
       return ListView.builder(

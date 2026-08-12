@@ -694,7 +694,9 @@ class PatientHistoryScreen extends StatelessWidget {
   }
 
   Widget _buildEmptyState() {
-    return const Center(
+    // The "No appointments found" notice enters with the same fade + slide
+    // family as the rest of the app's empty states.
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -714,7 +716,10 @@ class PatientHistoryScreen extends StatelessWidget {
           ),
         ],
       ),
-    );
+    )
+        .animate()
+        .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+        .slideY(begin: 0.08, end: 0, duration: 400.ms, curve: Curves.easeOut);
   }
 }
 

@@ -1255,6 +1255,9 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
   // ── States ──
 
   Widget _buildErrorState(Color textColor, Color bodyColor) {
+    // The AnimatedSwitcher already crossfades between states — this adds
+    // the fade + slide entrance on top so the ERROR state itself arrives
+    // with the same motion as the app's other error/warning notices.
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -1296,7 +1299,10 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
           ],
         ),
       ),
-    );
+    )
+        .animate()
+        .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+        .slideY(begin: 0.08, end: 0, duration: 400.ms, curve: Curves.easeOut);
   }
 
   Widget _buildEmptyState(Color textColor, Color bodyColor) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:get/get.dart';
 import '../../config/theme.dart';
 import '../../controllers/doctor_availability_controller.dart';
@@ -349,7 +350,12 @@ class _DoctorAvailabilityScreenState extends State<DoctorAvailabilityScreen> {
   // ── Error banner (soft-fail load, with retry) ──────────────────
 
   Widget _buildErrorBanner() {
+    // Keyed by the error text so the entrance animation REPLAYS when a
+    // retry lands a different message (or the same one re-appears after
+    // clearing) — the notice always animates in, matching the app-wide
+    // animated-notice language.
     return Container(
+      key: ValueKey(controller.loadError.value),
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -373,7 +379,13 @@ class _DoctorAvailabilityScreenState extends State<DoctorAvailabilityScreen> {
           ),
         ],
       ),
-    );
+    )
+        // The soft-fail load notice drops in the same fade + slide family
+        // as the patient-side gate banner — read as a notice arriving,
+        // never a jarring pop.
+        .animate()
+        .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+        .slideY(begin: -0.2, end: 0, duration: 400.ms, curve: Curves.easeOut);
   }
 
   // ── Summary ─────────────────────────────────────────────────────
