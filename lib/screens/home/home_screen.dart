@@ -67,6 +67,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Tracks the messages subscription so it can be cancelled on dispose.
   StreamSubscription? _messagesSub;
 
+  /// Tracks the speech-engine readiness subscription so it can be
+  /// cancelled on dispose.
+  StreamSubscription? _micInitSub;
+
+  /// Set when a greeting has finished but the speech engine wasn't ready
+  /// yet (its init is deferred to the dashboard and the mic-permission
+  /// prompt may still be open). The [isInitialized] listener below then
+  /// starts the mic the moment the engine flips ready — so the mic
+  /// auto-starts right after ALL permissions are allowed, not only when
+  /// the greeting happens to line up with a warm engine.
+  bool _micPendingAfterGreeting = false;
+
   @override
   void initState() {
     super.initState();
@@ -104,6 +116,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     });
 
+    // Fire the parked mic auto-start the moment the speech engine becomes
+    // ready (a greeting completed while the engine was still warming up /
+    // the mic-permission prompt was still open). Guards re-checked inside
+    // [_autoStartMicAfterGreeting], so a user who already started talking
+    // is never spoken over.
+    _micInitSub = _voiceController.isInitialized.listen((ready) {
+      if (ready && _micPendingAfterGreeting && mounted) {
+        _micPendingAfterGreeting = false;
+        _autoStartMicAfterGreeting();
+      }
+    });
+
     // Once the first frame is laid out, wait [_welcomeStartDelay] before
     // the avatar video starts (patient-side first open); the greeting
     // audio follows after its own stagger delay.
@@ -130,6 +154,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _welcomeTimer?.cancel();
     _greetingAudioTimer?.cancel();
     _messagesSub?.cancel();
+    _micInitSub?.cancel();
     TtsService.instance.stop();
     _chatScrollController.dispose();
     super.dispose();
@@ -170,10 +195,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       onComplete: () {
         if (mounted) setState(() => _welcomeActive = false);
         // The greeting-driven playback has finished — the avatar video
-        // stops on its own now. Persist that state so the next app open
-        // starts with the avatar paused ("first it plays, after it stops
-        // the state is saved in localStorage").
-        _setAvatarVideoPaused(true);
+        // stops on its own now, and the mic auto-starts so the patient
+        // can describe their symptoms right away. The avatar is NOT
+        // marked as paused: the welcome (video + greeting) replays on
+        // the next app open, and the mic starts after it again — every
+        // time the video + audio complete.
         _autoStartMicAfterGreeting();
       },
     );
@@ -264,7 +290,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _scheduleGreetingAudio(
         onComplete: () {
           if (mounted) setState(() => _welcomeActive = false);
-          _setAvatarVideoPaused(true);
+          // Every greeting completion — including a manual tap-to-resume
+          // replay — auto-starts the mic, exactly like the first
+          // auto-welcome.
+          _autoStartMicAfterGreeting();
         },
       );
     } else {
@@ -321,27 +350,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Called when the spoken greeting finishes. Auto-starts the mic so the
   /// user can immediately describe their symptoms.
   ///
-  /// The speech engine may still be warming up (its init is scheduled
-  /// ~500ms after controller creation) — if so, retry a few times over a
-  /// short window instead of giving up. In tests the engine is never
-  /// initialized, so nothing happens and the flow stays deterministic.
-  void _autoStartMicAfterGreeting({int attempt = 0}) {
+  /// Runs on EVERY greeting completion — the first auto-welcome, a manual
+  /// tap-to-resume replay, and the clear-chat replay. When the speech
+  /// engine isn't ready yet (its init is deferred to the dashboard, and
+  /// the mic-permission prompt may still be on screen), the auto-start is
+  /// PARKED — the [isInitialized] listener fires it the moment the engine
+  /// flips ready, so the mic starts right after all permissions are
+  /// allowed. In tests the engine is never initialized, so nothing
+  /// happens and the flow stays deterministic.
+  void _autoStartMicAfterGreeting() {
     final vc = _voiceController;
     if (!mounted) return;
+    // Only start the mic while the home screen is actually on top — the
+    // parked listener can fire well after the greeting (once the engine
+    // finishes initializing / permission is granted), by which time the
+    // user may have navigated away. Never start recording on a screen
+    // they aren't looking at (same guard as [_speakGreeting]).
+    if (!(ModalRoute.of(context)?.isCurrent ?? false)) {
+      _micPendingAfterGreeting = false;
+      return;
+    }
     if (vc.messages.isNotEmpty) return;
     if (vc.isListening.value ||
         vc.isProcessing.value ||
         vc.isRecordingAudio.value) {
+      _micPendingAfterGreeting = false;
       return;
     }
     if (!vc.isInitialized.value) {
-      if (attempt < 5) {
-        Future.delayed(const Duration(milliseconds: 400), () {
-          if (mounted) _autoStartMicAfterGreeting(attempt: attempt + 1);
-        });
-      }
+      // Park the auto-start until the engine (and its permission prompt)
+      // finishes initializing.
+      _micPendingAfterGreeting = true;
       return;
     }
+    _micPendingAfterGreeting = false;
     vc.startListening();
   }
 

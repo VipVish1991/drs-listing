@@ -312,11 +312,11 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
         expect(fakeTts.speakCalls, 2); // resume greeting spoken with video
 
-        // When the resumed greeting finishes, the mic is NOT auto-started
-        // again — that's exclusive to the first auto-welcome.
+        // When the resumed greeting finishes, the mic auto-starts again —
+        // every video + audio completion starts the mic.
         fakeTts.lastOnComplete?.call();
         await tester.pump();
-        expect(vc.autoStartCalls, 1);
+        expect(vc.autoStartCalls, 2);
 
         await _settleAnimations(tester);
       },
@@ -389,6 +389,29 @@ void main() {
       await _settleAnimations(tester);
     });
 
+    testWidgets('parks the mic auto-start until the engine is ready '
+        '(permission granted), then starts it', (tester) async {
+      final vc = _ReadyVoiceController(initialized: false);
+      Get.put<VoiceController>(vc, permanent: true);
+
+      final fakeTts = await _pumpHomeScreen(tester, vc);
+      fakeTts.lastOnComplete?.call();
+      await tester.pump();
+
+      // Greeting completed but the engine isn't ready yet (its init is
+      // deferred and the mic-permission prompt may still be open) — the
+      // mic stays off, parked.
+      expect(vc.autoStartCalls, 0);
+
+      // The engine (and its permission prompt) finishes initializing →
+      // the parked auto-start fires and the mic starts.
+      vc.isInitialized.value = true;
+      await tester.pump();
+      expect(vc.autoStartCalls, 1);
+
+      await _settleAnimations(tester);
+    });
+
     testWidgets('tapping the screen while listening stops the mic', (
       tester,
     ) async {
@@ -437,8 +460,8 @@ void main() {
       await _settleAnimations(tester);
     });
 
-    testWidgets('saves paused=true in local storage when the welcome '
-        'playback stops', (tester) async {
+    testWidgets('does NOT persist paused after the welcome playback stops '
+        '(replays on the next open)', (tester) async {
       final vc = _ReadyVoiceController(initialized: false);
       Get.put<VoiceController>(vc, permanent: true);
 
@@ -446,11 +469,12 @@ void main() {
       // Before the greeting finishes, no pause state has been saved yet.
       expect(LocalStorageService().isAvatarVideoPaused(), isFalse);
 
-      // Greeting completes → the avatar video stops on its own → the
-      // paused state is persisted for the next app open.
+      // Greeting completes → the avatar video stops on its own, but the
+      // pause state is NOT persisted — the welcome (video + greeting +
+      // auto-mic) replays on the next app open, every time.
       fakeTts.lastOnComplete?.call();
       await tester.pump();
-      expect(LocalStorageService().isAvatarVideoPaused(), isTrue);
+      expect(LocalStorageService().isAvatarVideoPaused(), isFalse);
 
       await _settleAnimations(tester);
     });
