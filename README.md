@@ -471,6 +471,14 @@ complete DrsListing database. Regenerate after any schema change with:
 python supabase/gen_schema_docs.py
 ```
 
+## Android build prerequisite (Firebase config)
+
+`android/app/google-services.json` is **gitignored** (it holds Firebase
+client API keys) and is not in the repo. Fresh clones must drop the file
+into `android/app/` before the Android build succeeds — download it from
+Firebase Console → Project settings → Your apps, and keep a local copy
+(e.g. in the same directory as `.env.deploy`).
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.
