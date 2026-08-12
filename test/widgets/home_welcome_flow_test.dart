@@ -6,6 +6,7 @@ import 'package:DrsListing/config/theme.dart';
 import 'package:DrsListing/controllers/auth_controller.dart';
 import 'package:DrsListing/controllers/home_controller.dart';
 import 'package:DrsListing/controllers/voice_controller.dart';
+import 'package:DrsListing/models/ai_response_model.dart';
 import 'package:DrsListing/screens/home/home_screen.dart';
 import 'package:DrsListing/services/local_storage_service.dart';
 import 'package:DrsListing/services/tts_service.dart';
@@ -456,6 +457,32 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 1100));
       expect(fakeTts.speakCalls, 2); // replay after clear
+
+      await _settleAnimations(tester);
+    });
+
+    testWidgets('clearing the chat replays the greeting even after a real '
+        'conversation', (tester) async {
+      final vc = _ReadyVoiceController(initialized: false);
+      Get.put<VoiceController>(vc, permanent: true);
+
+      final fakeTts = await _pumpHomeScreen(tester, vc);
+      expect(fakeTts.speakCalls, 1); // welcome greeting
+
+      // A real conversation starts — the greeting is cut short, but the
+      // avatar is NOT marked paused (only a deliberate tap-to-pause does),
+      // so the greeting can replay once the conversation ends.
+      vc.messages.add(ChatMessage(text: 'I have a fever', isUser: true));
+      await tester.pump();
+      expect(LocalStorageService().isAvatarVideoPaused(), isFalse);
+
+      // The conversation ends (chat cleared) → the greeting replays.
+      await tester.ensureVisible(find.byIcon(Icons.delete_outline_rounded));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1100));
+      expect(fakeTts.speakCalls, 2); // replay after the conversation ends
 
       await _settleAnimations(tester);
     });

@@ -252,15 +252,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Immediately halts any pending/still-speaking greeting + speaking
   /// animation. Called once a chat message exists (text or voice), so
   /// the assistant never keeps talking over an active conversation.
+  ///
+  /// A conversation starting does NOT mark the avatar as paused — only a
+  /// deliberate tap-to-pause does (see [_handleAvatarPlaybackChanged]) —
+  /// so the greeting can replay once the conversation ends (chat cleared)
+  /// and on the next app open.
   void _stopGreetingAudio() {
     _greetingAudioTimer?.cancel();
     TtsService.instance.stop();
     if (_welcomeActive && mounted) {
       setState(() => _welcomeActive = false);
     }
-    // The avatar video has stopped (greeting cut short / a conversation
-    // started) — remember the paused state for the next app open.
-    _setAvatarVideoPaused(true);
   }
 
   /// Tapping the avatar video to pause it acts as a single "stop
