@@ -145,6 +145,24 @@ class NotificationService {
     syncTokenForCurrentUser();
   }
 
+  /// Bounded startup variant of [init] for main(): runs [init] (defaults to
+  /// [this.init]) with a hard [timeout] so a native plugin that hangs — e.g.
+  /// FirebaseMessaging's permission/token calls on devices with broken
+  /// Google Play Services — can never block app startup. Never throws: on
+  /// timeout or failure startup continues and notifications silently no-op,
+  /// exactly as they already do when Firebase is unavailable. Tests inject a
+  /// stub [init] with a short [timeout].
+  Future<void> initBounded({
+    Future<void> Function()? init,
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    try {
+      await (init ?? this.init)().timeout(timeout);
+    } catch (_) {
+      // Timed out or failed — notifications silently no-op, app continues.
+    }
+  }
+
   /// Register FCM listeners exactly once (token rotation, foreground banner,
   /// tap navigation). Safe to call repeatedly.
   void _attachListeners() {

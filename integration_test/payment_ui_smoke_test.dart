@@ -4,9 +4,11 @@
 /// 1. The **UPI payment modal** — the "Consultation Payment" bottom sheet
 ///    shows the doctor's UPI ID (`Pay to: <upi>`) in its header, and the
 ///    UPI app picker shows the payee badge (`Dr. Name (upi)`).
-/// 2. The **month-wise payment history chips** — the chip bar renders an
-///    All chip + one chip per month, tapping a month filters the list and
-///    titles the summary, and All resets the filter.
+/// 2. The **payment history filter bar** — the bar renders exactly the four
+///    scope chips (All / Custom range / Last 30 days / This month — the old
+///    per-month chips are gone), the yearly strip shows the 12-month window
+///    vs the current month, tapping a preset scopes the list + summary, and
+///    All resets the filter.
 ///
 /// Run on an emulator/device with:
 ///   flutter test integration_test/payment_ui_smoke_test.dart -d `<device>`
@@ -320,8 +322,8 @@ void main() {
     await _capture(binding, 'upi_app_picker');
   });
 
-  testWidgets('ON-DEVICE: month chips render, filter, title the summary '
-      'and All resets', (tester) async {
+  testWidgets('ON-DEVICE: filter bar renders, presets scope the list and '
+      'All resets', (tester) async {
     final controller = PaymentHistoryController();
     controller.payments.value = [
       _makePayment(
@@ -350,44 +352,59 @@ void main() {
     ];
     await _pumpPaymentHistory(tester, controller);
 
-    // Chip bar: All + one chip per month (newest first).
+    // The bar is exactly the four scope chips — no per-month chips (the
+    // old month chips were replaced by the quick presets + yearly strip).
     expect(find.text('All'), findsOneWidget);
-    expect(find.text('Aug 2026'), findsOneWidget);
-    expect(find.text('Jul 2026'), findsOneWidget);
-    expect(find.text('Jun 2026'), findsOneWidget);
+    expect(find.text('Custom range'), findsOneWidget);
+    expect(find.text('Last 30 days'), findsOneWidget);
+    expect(find.text('This month'), findsOneWidget);
+    expect(find.text('Aug 2026'), findsNothing);
+    expect(find.text('Jul 2026'), findsNothing);
+    expect(find.text('Jun 2026'), findsNothing);
 
-    // The month chip bar is a lazy horizontal ListView — chips scrolled out
-    // of view are disposed from the element tree, so a plain ensureVisible
-    // on a later chip culls the leftmost chips (e.g. "All"). Scroll the bar
-    // itself until the target chip re-materializes before tapping. On the
-    // physical device (392px wide vs 411px emulator) "Aug 2026" starts just
-    // past the right edge.
+    // Yearly strip in the summary card: the whole 12-month window
+    // (800+500+300 = 1600) vs the current month (Aug = 800), and the
+    // all-time summary with the Paid/Pending split pills.
+    expect(find.text('Last 12 months'), findsOneWidget);
+    expect(find.text('Current month'), findsOneWidget);
+    expect(find.text('₹1600'), findsOneWidget);
+    expect(find.text('₹1300'), findsOneWidget);
+    expect(find.text('Paid ₹1300'), findsOneWidget);
+    expect(find.text('Pending ₹300'), findsOneWidget);
+    expect(find.text('3 payment records'), findsOneWidget);
+
+    await _capture(binding, 'filter_all');
+
+    // The filter bar is a lazy horizontal ListView — chips scrolled out of
+    // view are disposed from the element tree, so scroll the bar until the
+    // last chip ('This month') re-materializes before tapping it.
     Finder chipBar() => find.byWidgetPredicate(
       (w) => w is ListView && w.scrollDirection == Axis.horizontal,
     );
-
-    // Tap August → only August's payment remains and the summary scopes
-    // to the month.
     await tester.dragUntilVisible(
-      find.text('Aug 2026'),
+      find.text('This month'),
       chipBar(),
-      const Offset(-50, 0), // drag content left → scroll right toward Aug
+      const Offset(-50, 0), // drag content left → scroll right toward the end
       maxIteration: 20,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Aug 2026'));
+    await tester.tap(find.text('This month'));
     await tester.pumpAndSettle();
+
+    // Only August's payment (Aug 6, inside the current month on the device
+    // clock) remains; the summary scopes to the range.
     expect(find.text('Dr. Alpha'), findsOneWidget);
     expect(find.text('Dr. Beta'), findsNothing);
     expect(find.text('Dr. Gamma'), findsNothing);
-    expect(find.text('Payment Summary — Aug 2026'), findsOneWidget);
     expect(find.text('Paid ₹800'), findsOneWidget);
     expect(find.text('Pending ₹0'), findsOneWidget);
+    // The all-time figures leave once a range is active.
+    expect(find.text('Paid ₹1300'), findsNothing);
 
-    await _capture(binding, 'month_filtered');
+    await _capture(binding, 'filter_this_month');
 
-    // All resets the filter back to the all-time figures. "All" was culled
-    // when the bar scrolled right, so drag the bar back to its start.
+    // All resets back to the all-time figures. "All" was culled when the
+    // bar scrolled right, so drag the bar back to its start first.
     await tester.dragUntilVisible(
       find.text('All'),
       chipBar(),
@@ -400,9 +417,10 @@ void main() {
     expect(find.text('Dr. Alpha'), findsOneWidget);
     expect(find.text('Dr. Beta'), findsOneWidget);
     expect(find.text('Dr. Gamma'), findsOneWidget);
-    expect(find.text('Payment Summary'), findsOneWidget);
     expect(find.text('3 payment records'), findsOneWidget);
+    expect(find.text('Paid ₹1300'), findsOneWidget);
+    expect(find.text('Pending ₹300'), findsOneWidget);
 
-    await _capture(binding, 'month_all');
+    await _capture(binding, 'filter_all_reset');
   });
 }

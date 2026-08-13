@@ -44,14 +44,8 @@ void main() async {
   //
   // Bounded: the permission/token calls inside can hang forever on broken
   // Google Play Services, and awaiting them indefinitely would block app
-  // startup — a timeout keeps the boot path resilient.
-  try {
-    await NotificationService.instance
-        .init()
-        .timeout(const Duration(seconds: 8));
-  } catch (_) {
-    // Timed out or failed — notifications silently no-op, app continues.
-  }
+  // startup — a timeout keeps the boot path resilient (never throws).
+  await NotificationService.instance.initBounded();
 
   // Inject dependencies.
   //

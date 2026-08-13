@@ -57,8 +57,12 @@ void main() {
   /// Pumps the OTP screen (patient registration) with a fake AuthService
   /// and a registered /home route so the post-verification navigation
   /// resolves. The OTP screen needs no backend — the fake verifies the
-  /// whole flow on-device without Supabase.
-  Future<WidgetTester> pumpOtp(WidgetTester tester) async {
+  /// whole flow on-device without Supabase. Pass [fake] to keep a handle
+  /// on the AuthService after the screen is replaced by the home route.
+  Future<WidgetTester> pumpOtp(
+    WidgetTester tester, {
+    _FakeAuthService? fake,
+  }) async {
     await tester.pumpWidget(
       GetMaterialApp(
         theme: AppTheme.lightTheme,
@@ -72,7 +76,7 @@ void main() {
           displayName: 'Smoke Patient',
           mobile: '9876543210',
           role: UserModel.rolePatient,
-          authService: _FakeAuthService(),
+          authService: fake ?? _FakeAuthService(),
         ),
       ),
     );
@@ -92,7 +96,8 @@ void main() {
   testWidgets(
       'ON-DEVICE: default OTP 1111 is pre-filled and verifies to patient '
       'home', (tester) async {
-    await pumpOtp(tester);
+    final fake = _FakeAuthService();
+    await pumpOtp(tester, fake: fake);
 
     // Default OTP '1111' pre-filled → pin boxes render '1', and the pill
     // tells the user the default code.
@@ -104,9 +109,9 @@ void main() {
     await tester.tap(find.text('Verify & Continue'));
     await tester.pumpAndSettle();
 
-    final fake = tester
-        .widget<OtpVerificationScreen>(find.byType(OtpVerificationScreen))
-        .authService as _FakeAuthService;
+    // The OTP screen is replaced by the home route once verified, so the
+    // fake is asserted through the reference captured above, not by
+    // looking the widget up after navigation.
     expect(fake.registerCalls, 1);
     expect(find.text('PATIENT HOME'), findsOneWidget);
 
