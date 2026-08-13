@@ -41,7 +41,17 @@ void main() async {
   // Firebase Cloud Messaging (push notifications). Non-fatal: without Play
   // Services / on desktop this degrades to a silent no-op, and notification
   // calls from the app are always fire-and-forget.
-  await NotificationService.instance.init();
+  //
+  // Bounded: the permission/token calls inside can hang forever on broken
+  // Google Play Services, and awaiting them indefinitely would block app
+  // startup — a timeout keeps the boot path resilient.
+  try {
+    await NotificationService.instance
+        .init()
+        .timeout(const Duration(seconds: 8));
+  } catch (_) {
+    // Timed out or failed — notifications silently no-op, app continues.
+  }
 
   // Inject dependencies.
   //
