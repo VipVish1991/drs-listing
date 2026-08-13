@@ -31,6 +31,27 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Generate .env for build
+        # .env is gitignored (contains real API keys), so a fresh checkout
+        # has none — and flutter build fails when a declared asset is
+        # missing. Inject the keys from repo secrets when configured;
+        # otherwise fall back to the placeholder template so the build
+        # still succeeds (app boots, but API-backed features need secrets).
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          if [ -n "$GOOGLE_MAPS_API_KEY" ]; then
+            cat > .env <<EOF
+            GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY
+            OPENAI_API_KEY=$OPENAI_API_KEY
+            GROQ_API_KEY=$GROQ_API_KEY
+            EOF
+          else
+            cp .env.example .env
+          fi
+
       - name: Build web
         # GitHub Pages project site: served under /drs-listing/, so the
         # base href must match or assets 404.
