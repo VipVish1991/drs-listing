@@ -93,13 +93,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     NotificationCenterController.instance.load();
 
     // The patient is now logged in and on the dashboard — this is the
-    // right moment to ask for the microphone permission (voice assistant)
-    // and warm up the speech engine. Both are fire-and-forget: a denied
-    // prompt or an engine that isn't ready yet never blocks the home
-    // screen — the voice pipeline surfaces its own errors when the mic
-    // is actually used.
-    _requestMicPermission();
-    _voiceController.initSpeech();
+    // right moment to ask for permissions and warm up the speech engine.
+    // The prompts run SEQUENTIALLY, one at a time: the location (GPS)
+    // permission first (driven by HomeController's dialog), and only
+    // after that flow resolves does the microphone permission get asked
+    // (voice assistant) and the speech engine warm up. The avatar welcome
+    // (video + greeting audio) then starts, so the greeting never speaks
+    // over a prompt; when it finishes, the mic auto-starts (see
+    // [_autoStartMicAfterGreeting]). Every step is fire-and-forget — a
+    // denied prompt never blocks the home screen.
+    _runPermissionSequencedSetup();
 
     // When the chat is cleared (delete button) the empty state returns —
     // reset the flag so the greeting + auto-mic welcome replays. The
@@ -127,15 +130,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _autoStartMicAfterGreeting();
       }
     });
+  }
 
-    // Once the first frame is laid out, wait [_welcomeStartDelay] before
-    // the avatar video starts (patient-side first open); the greeting
-    // audio follows after its own stagger delay.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _welcomeTimer?.cancel();
-      _welcomeTimer = Timer(_welcomeStartDelay, () {
-        if (mounted) _maybeRunWelcomeFlow();
-      });
+  /// Chains the post-login setup off the location-permission flow, so the
+  /// OS permission prompts never overlap:
+  ///
+  ///   1. GPS permission — HomeController's dialog (awaiting
+  ///      [HomeController.locationPermissionFlowDone] covers both the
+  ///      "already granted" and the "user just answered the dialog"
+  ///      cases).
+  ///   2. Microphone permission — the explicit request below, plus the
+  ///      speech-engine warmup which surfaces the OS mic prompt on
+  ///      Android. Awaiting the request means the avatar welcome below
+  ///      never starts (and its greeting never speaks) while a prompt is
+  ///      still on screen.
+  ///   3. Avatar welcome — video + greeting audio play together; when
+  ///      they finish, the mic auto-starts (see [_autoStartMicAfterGreeting]).
+  Future<void> _runPermissionSequencedSetup() async {
+    await _homeController.whenLocationPermissionFlowDone();
+    if (!mounted) return;
+    await _requestMicPermission();
+    if (!mounted) return;
+    // Warm up the speech engine (fire-and-forget: an engine that isn't
+    // ready yet never blocks the screen — the auto-mic parks until it is).
+    _voiceController.initSpeech();
+    _scheduleWelcomeFlow();
+  }
+
+  /// Starts the first welcome: wait [_welcomeStartDelay] before the
+  /// avatar video kicks in (patient-side first open); the greeting audio
+  /// follows together with it. Called once the permission flow has
+  /// resolved so the video never plays behind a prompt. One-shot —
+  /// cancelled as soon as the user starts interacting (or the widget is
+  /// disposed).
+  void _scheduleWelcomeFlow() {
+    if (!mounted) return;
+    _welcomeTimer?.cancel();
+    _welcomeTimer = Timer(_welcomeStartDelay, () {
+      if (mounted) _maybeRunWelcomeFlow();
     });
   }
 

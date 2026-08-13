@@ -992,6 +992,61 @@ void main() {
     },
   );
 
+  testWidgets('details sheet always shows the fresh payment status — '
+      'reopen after Mark Paid reads the updated map', (tester) async {
+    final controller = await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_PAY_SHEET',
+          patientName: 'Sheet Pay Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        'APT_PAY_SHEET': paymentFor(
+          appointmentId: 'APT_PAY_SHEET',
+          amount: 1000,
+        ),
+      },
+    );
+
+    // The sheet is a snapshot taken at OPEN time: while the payment is
+    // still Pending it shows Pending (card chip + sheet chip).
+    await tester.tap(find.text('Sheet Pay Patient'));
+    await tester.pumpAndSettle();
+    expect(find.text('Appointment ID'), findsOneWidget);
+    expect(find.text('Pending'), findsNWidgets(2));
+    expect(find.text('Paid'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('appointment_details_close')));
+    await tester.pumpAndSettle();
+
+    // The clinic settles the fee (markPaymentStatus → loadPayments
+    // replaces the map).
+    controller.paymentsByAppointment.value = {
+      'APT_PAY_SHEET': paymentFor(
+        appointmentId: 'APT_PAY_SHEET',
+        paymentStatus: 'Paid',
+        amount: 1000,
+      ),
+    };
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // Reopening the sheet re-reads the map, so the paid status is always
+    // what the doctor last settled — no stale 'Pending' anywhere.
+    await tester.tap(find.text('Sheet Pay Patient'));
+    await tester.pumpAndSettle();
+    expect(find.text('Paid'), findsNWidgets(2));
+    expect(find.text('Pending'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('appointment_details_close')));
+    await tester.pumpAndSettle();
+    await _settleAnimations(tester);
+  });
+
   testWidgets('Mark Paid confirm flips the offline payment to Paid', (
     tester,
   ) async {
@@ -1033,6 +1088,118 @@ void main() {
     await _settleAnimations(tester);
     // Let the success snackbar's auto-dismiss timer (Get.snackbar) fire
     // so no timers are left pending when the test ends.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Mark Paid refresh: card flips to Paid once payments reload', (
+    tester,
+  ) async {
+    final controller = await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_PAY',
+          patientName: 'Pay Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {'APT_PAY': paymentFor(appointmentId: 'APT_PAY', amount: 1000)},
+    );
+
+    // Card starts Pending + actionable.
+    expect(find.text('Pending'), findsOneWidget);
+    expect(find.text('Mark Paid'), findsOneWidget);
+
+    await tester.tap(find.text('Mark Paid'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Mark Paid'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsNothing);
+
+    // The real controller reloads the payment map after the flip lands
+    // (markPaymentStatus -> loadPayments), replacing it wholesale. The card
+    // must rebuild: chip flips to Paid, settle actions disappear.
+    controller.paymentsByAppointment.value = {
+      'APT_PAY': paymentFor(
+        appointmentId: 'APT_PAY',
+        amount: 1000,
+        paymentStatus: 'Paid',
+      ),
+    };
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Paid'), findsWidgets,
+        reason: 'payment chip must flip to Paid after the reload');
+    expect(find.text('Pending'), findsNothing,
+        reason: 'the stale Pending chip must be gone');
+    expect(find.text('Mark Paid'), findsNothing,
+        reason: 'Mark Paid action must disappear once settled');
+    expect(find.text('Refund'), findsNothing,
+        reason: 'Refund action must disappear once settled');
+
+    await _settleAnimations(tester);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Refund refresh: card flips to Refunded once payments reload', (
+    tester,
+  ) async {
+    final controller = await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_REFUND',
+          patientName: 'Refund Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        'APT_REFUND': paymentFor(appointmentId: 'APT_REFUND', amount: 500),
+      },
+    );
+
+    // Card starts Pending + actionable.
+    expect(find.text('Pending'), findsOneWidget);
+    expect(find.text('Refund'), findsOneWidget);
+
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Refund'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsNothing);
+
+    // Simulate the controller's post-flip reload of the payment map.
+    controller.paymentsByAppointment.value = {
+      'APT_REFUND': paymentFor(
+        appointmentId: 'APT_REFUND',
+        amount: 500,
+        paymentStatus: 'Refunded',
+      ),
+    };
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Refunded'), findsWidgets,
+        reason: 'payment chip must flip to Refunded after the reload');
+    expect(find.text('Pending'), findsNothing,
+        reason: 'the stale Pending chip must be gone');
+    expect(find.text('Mark Paid'), findsNothing,
+        reason: 'Mark Paid action must disappear once refunded');
+    expect(find.text('Refund'), findsNothing,
+        reason: 'Refund action must disappear once refunded');
+
+    await _settleAnimations(tester);
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
   });

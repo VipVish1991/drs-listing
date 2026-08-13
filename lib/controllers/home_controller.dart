@@ -32,6 +32,50 @@ class HomeController extends GetxController {
   Timer? _locationTimer;
   bool _hasShownLocationDialog = false;
 
+  // ── Location-permission flow gate ───────────────────────────────
+  /// Completes once the one-shot location (GPS) permission flow has run
+  /// to its end: the user answered the dialog (Allow or Later), or no
+  /// prompt was needed because permission was already granted (or this is
+  /// a doctor session). The patient home screen waits on this before
+  /// asking for the microphone permission, so the two OS permission
+  /// prompts never overlap — GPS first, mic second.
+  final Completer<void> _locationPermissionFlowDone = Completer<void>();
+
+  /// Resolves when the location-permission flow is finished — the home
+  /// screen chains its mic-permission request off this future.
+  Future<void> get locationPermissionFlowDone =>
+      _locationPermissionFlowDone.future;
+
+  /// Await to run once the location-permission flow has resolved (the GPS
+  /// prompt was answered, or none was needed).
+  ///
+  /// Unlike awaiting the raw [locationPermissionFlowDone] future, this
+  /// always completes in the CALLER's zone — even when the flow already
+  /// finished before the await was registered (awaiting an already
+  /// completed future resumes on the zone where it completed, which in
+  /// tests is the real event loop from `setUp`, never driven by the fake
+  /// test clock). The async wrapper's own completion is scheduled in the
+  /// current zone, so the caller's continuation always runs there.
+  Future<void> whenLocationPermissionFlowDone() async {
+    if (_locationPermissionFlowDone.isCompleted) return;
+    await _locationPermissionFlowDone.future;
+  }
+
+  void _completeLocationPermissionFlow() {
+    if (!_locationPermissionFlowDone.isCompleted) {
+      _locationPermissionFlowDone.complete();
+    }
+  }
+
+  /// Test-double hook: completes the permission-flow gate as if no GPS
+  /// prompt was needed. Test doubles stub [onInit] (skipping the real
+  /// check), so without this the home screen's GPS→mic sequencing would
+  /// stall forever in tests.
+  @visibleForTesting
+  void completeLocationPermissionFlowForTest() {
+    _completeLocationPermissionFlow();
+  }
+
   /// Test hook — replaces the real GPS-service probe (a platform call that
   /// throws MissingPluginException on bare test bindings) with a fake.
   @visibleForTesting
@@ -72,10 +116,16 @@ class HomeController extends GetxController {
   }
 
   Future<void> _checkAndShowLocationPermission() async {
-    if (_hasShownLocationDialog) return;
+    if (_hasShownLocationDialog) {
+      _completeLocationPermissionFlow();
+      return;
+    }
     // Patient-only: if this process is now a doctor session (shared device
     // where a patient's controller outlived their session), never ask.
-    if (_authController.isDoctor) return;
+    if (_authController.isDoctor) {
+      _completeLocationPermissionFlow();
+      return;
+    }
 
     try {
       LocationPermission permission = await Geolocator.checkPermission();
@@ -89,7 +139,10 @@ class HomeController extends GetxController {
         // HomeController is created by the patient shell (MainShell) after
         // runApp, so the tree always exists here — kept as a safety net
         // (the controller may outlive the shell across logout/login).
-        if (Get.key.currentState == null) return;
+        if (Get.key.currentState == null) {
+          _completeLocationPermissionFlow();
+          return;
+        }
 
         Get.dialog(
           AlertDialog(
@@ -99,8 +152,15 @@ class HomeController extends GetxController {
               'Your location is used only for finding healthcare providers near you.',
             ),
             actions: [
+              // The flow gate completes the moment the user answers — a
+              // 'Later' skips straight on; 'Allow' waits until the OS
+              // prompt + location fetch have run so the next permission
+              // (mic) is only asked after GPS is fully settled.
               TextButton(
-                onPressed: () => Get.back(),
+                onPressed: () {
+                  Get.back();
+                  _completeLocationPermissionFlow();
+                },
                 child: const Text('Later'),
               ),
               TextButton(
@@ -108,6 +168,7 @@ class HomeController extends GetxController {
                   Get.back();
                   await _locationService.requestPermission();
                   await _fetchLocation();
+                  _completeLocationPermissionFlow();
                 },
                 child: const Text('Allow'),
               ),
@@ -115,12 +176,17 @@ class HomeController extends GetxController {
           ),
           barrierDismissible: false,
         );
+      } else {
+        // Already granted — nothing to ask for, and nothing to wait on.
+        _completeLocationPermissionFlow();
       }
     } catch (_) {
       // Geolocator may throw MissingPluginException on some platforms
       // or during first launch.  Silently skip — the splash screen
       // will handle location checks, and the home UI shows a
-      // location-off indicator.
+      // location-off indicator. The gate still opens so the mic flow
+      // is never blocked by a platform that can't probe GPS.
+      _completeLocationPermissionFlow();
     }
   }
 

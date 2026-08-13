@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:get/get.dart';
 import '../../config/theme.dart';
 import '../../controllers/auth_controller.dart';
@@ -256,6 +257,8 @@ class _SlotsTabWrapper extends StatelessWidget {
     return Obx(() {
       final doctor = Get.find<DoctorController>().currentDoctor.value;
       if (doctor == null) {
+        // The fallback notice enters with the same fade + slide family as
+        // the rest of the app's empty/fallback messages.
         return Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -268,7 +271,10 @@ class _SlotsTabWrapper extends StatelessWidget {
               ),
             ],
           ),
-        );
+        )
+            .animate()
+            .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+            .slideY(begin: 0.08, end: 0, duration: 400.ms, curve: Curves.easeOut);
       }
       return DoctorAvailabilityScreen(doctor: doctor);
     });

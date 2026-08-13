@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
 import '../helpers/fake_video_platform.dart';
+import '../helpers/mock_permissions.dart';
 
 class _TestAuthController extends AuthController {
   @override
@@ -25,7 +26,12 @@ class _TestAuthController extends AuthController {
 class _TestHomeController extends HomeController {
   @override
   // ignore: must_call_super
-  void onInit() {}
+  void onInit() {
+    // The real controller opens the location-permission gate during its
+    // own init; the double skips that, so open it explicitly or the home
+    // screen's GPS→mic sequencing (which awaits this) would stall.
+    completeLocationPermissionFlowForTest();
+  }
 
   @override
   String get userName => 'Test User';
@@ -104,6 +110,10 @@ Future<void> _settleAnimations(WidgetTester tester) async {
 void main() {
   setUp(() async {
     Get.reset();
+    // The home screen's GPS→mic sequencing awaits the microphone probe;
+    // an unmocked permission_handler channel never resolves in widget
+    // tests, so resolve it as granted.
+    mockMicPermissionGranted();
     Get.put<AuthController>(_TestAuthController(), permanent: true);
     Get.put<HomeController>(_TestHomeController(), permanent: true);
     // Fresh, initialized local storage for every test so the saved
@@ -113,6 +123,7 @@ void main() {
   });
 
   tearDown(() {
+    clearMicPermissionMock();
     TtsService.setInstanceForTest(TtsService());
     // Restore the real (placeholder) video platform so the fake installed
     // by the tap-based test never leaks into the next test.

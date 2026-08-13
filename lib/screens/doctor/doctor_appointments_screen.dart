@@ -826,36 +826,45 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
           final isFinalized = status == 'Cancelled' || status == 'Completed';
           final isPending = status == AppointmentStatus.pending;
 
-          // The payment for this appointment (if any) — offline Pending
-          // rows get the Mark Paid / Refund actions; every other status
-          // shows as an informational chip.
-          final payment = _controller.paymentsByAppointment[a.appointmentId];
-          final paymentActionable =
-              payment != null &&
-              payment.paymentMethod == 'offline' &&
-              payment.paymentStatus == 'Pending';
+          // Per-card Obx for the payment line: ListView's itemBuilder runs
+          // lazily, AFTER the outer Obx builder — outside GetX's reactive
+          // tracking — so a payment lookup there alone never subscribes
+          // anything and a Mark Paid / Refund reload
+          // (loadPayments → paymentsByAppointment.value = …) leaves the
+          // card stale. Reading the map synchronously inside its own Obx
+          // makes each visible card rebuild in place when the payment
+          // status flips (Pending → Paid / Refunded: chip updates, settle
+          // actions disappear).
+          return Obx(() {
+            final payment =
+                _controller.paymentsByAppointment[a.appointmentId];
+            final paymentActionable =
+                payment != null &&
+                payment.paymentMethod == 'offline' &&
+                payment.paymentStatus == 'Pending';
 
-          return _ModernAppointmentCard(
-            appointment: a,
-            displayStatus: status,
-            isFinalized: isFinalized,
-            statusColor: AppointmentDetailsSheet.statusColor(status),
-            statusIcon: AppointmentDetailsSheet.statusIcon(status),
-            avatarInitials: _avatarInitial(a.patientName ?? 'Patient'),
-            avatarColor: _avatarBg(index),
-            index: index,
-            payment: payment,
-            onMarkPaid: payment != null && paymentActionable
-                ? () => _handleMarkPaid(a, payment)
-                : null,
-            onRefund: payment != null && paymentActionable
-                ? () => _handleRefund(a, payment)
-                : null,
-            onTap: () => _showAppointmentDetails(a),
-            onCancel: () => _handleCancel(a),
-            onConfirm: isPending ? () => _handleConfirm(a) : null,
-            onComplete: () => _handleComplete(a),
-          );
+            return _ModernAppointmentCard(
+              appointment: a,
+              displayStatus: status,
+              isFinalized: isFinalized,
+              statusColor: AppointmentDetailsSheet.statusColor(status),
+              statusIcon: AppointmentDetailsSheet.statusIcon(status),
+              avatarInitials: _avatarInitial(a.patientName ?? 'Patient'),
+              avatarColor: _avatarBg(index),
+              index: index,
+              payment: payment,
+              onMarkPaid: payment != null && paymentActionable
+                  ? () => _handleMarkPaid(a, payment)
+                  : null,
+              onRefund: payment != null && paymentActionable
+                  ? () => _handleRefund(a, payment)
+                  : null,
+              onTap: () => _showAppointmentDetails(a),
+              onCancel: () => _handleCancel(a),
+              onConfirm: isPending ? () => _handleConfirm(a) : null,
+              onComplete: () => _handleComplete(a),
+            );
+          });
         },
       );
     });

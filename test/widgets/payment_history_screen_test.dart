@@ -430,6 +430,50 @@ void main() {
     expect(find.text('Pending'), findsOneWidget);
   });
 
+  testWidgets('a status flip refreshes the open list (Pending → Paid)', (
+    tester,
+  ) async {
+    final controller = PaymentHistoryController();
+    controller.payments.value = [
+      makePayment(
+        id: 'pay_flip',
+        appointmentId: 'APT_FLIP',
+        doctorName: 'Dr. Green',
+        consultationType: 'clinic',
+        paymentStatus: 'Pending',
+        paymentMethod: 'offline',
+        amount: 1000,
+      ),
+    ];
+    await pumpScreen(tester, controller: controller);
+
+    // Starts Pending (the clinic hasn't collected the offline fee yet).
+    expect(find.text('Pending'), findsOneWidget);
+    expect(find.text('Paid'), findsNothing);
+
+    // The clinic settles the fee while the screen is open — the shared
+    // controller reloads the RxList (payments.value = …). The open list
+    // must rebuild: chip flips to Paid, the stale Pending chip disappears.
+    controller.payments.value = [
+      makePayment(
+        id: 'pay_flip',
+        appointmentId: 'APT_FLIP',
+        doctorName: 'Dr. Green',
+        consultationType: 'clinic',
+        paymentStatus: 'Paid',
+        paymentMethod: 'offline',
+        amount: 1000,
+      ),
+    ];
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Paid'), findsOneWidget,
+        reason: 'status chip must flip to Paid after the reload');
+    expect(find.text('Pending'), findsNothing,
+        reason: 'the stale Pending chip must be gone');
+  });
+
   testWidgets('tapping a row opens the details sheet with the full record', (
     tester,
   ) async {

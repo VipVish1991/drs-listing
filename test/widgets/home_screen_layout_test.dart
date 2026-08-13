@@ -11,6 +11,8 @@ import 'package:DrsListing/screens/home/home_screen.dart';
 import 'package:DrsListing/services/tts_service.dart';
 import 'package:DrsListing/widgets/voice_button.dart';
 
+import '../helpers/mock_permissions.dart';
+
 /// Test doubles that skip the network/location/speech work their real
 /// counterparts start in onInit (mirrors the pattern in
 /// main_shell_test.dart and profile_screen_test.dart).
@@ -23,7 +25,12 @@ class _TestAuthController extends AuthController {
 class _TestHomeController extends HomeController {
   @override
   // ignore: must_call_super
-  void onInit() {}
+  void onInit() {
+    // The real controller opens the location-permission gate during its
+    // own init; the double skips that, so open it explicitly or the home
+    // screen's GPS→mic sequencing (which awaits this) would stall.
+    completeLocationPermissionFlowForTest();
+  }
 
   /// Overridden so the header shows a deterministic greeting.
   @override
@@ -96,12 +103,17 @@ Future<void> _settleAnimations(WidgetTester tester) async {
 void main() {
   setUp(() {
     Get.reset();
+    // The home screen's GPS→mic sequencing awaits the microphone probe;
+    // an unmocked permission_handler channel never resolves in widget
+    // tests, so resolve it as granted.
+    mockMicPermissionGranted();
     TtsService.setInstanceForTest(_FakeTtsService());
     Get.put<AuthController>(_TestAuthController(), permanent: true);
     Get.put<HomeController>(_TestHomeController(), permanent: true);
   });
 
   tearDown(() {
+    clearMicPermissionMock();
     TtsService.setInstanceForTest(TtsService());
     Get.reset();
   });

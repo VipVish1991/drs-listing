@@ -9,6 +9,8 @@ import 'package:DrsListing/controllers/voice_controller.dart';
 import 'package:DrsListing/screens/home/home_screen.dart';
 import 'package:DrsListing/services/tts_service.dart';
 
+import '../helpers/mock_permissions.dart';
+
 class _TestAuthController extends AuthController {
   @override
   // ignore: must_call_super
@@ -16,6 +18,25 @@ class _TestAuthController extends AuthController {
 }
 
 class _TestHomeController extends HomeController {
+  @override
+  // ignore: must_call_super
+  void onInit() {
+    // The real controller opens the location-permission gate during its
+    // own init; the double skips that, so open it explicitly or the home
+    // screen's GPS→mic sequencing (which awaits this) would stall.
+    completeLocationPermissionFlowForTest();
+  }
+
+  @override
+  String get userName => 'Test';
+}
+
+/// HomeController whose location-permission gate stays PENDING until the
+/// test releases it — simulates the GPS permission dialog still being on
+/// screen (the real controller shows it ~500ms after the dashboard
+/// opens). Lets the sequencing be asserted: mic must NOT be asked before
+/// the GPS flow resolves.
+class _PendingFlowHomeController extends HomeController {
   @override
   // ignore: must_call_super
   void onInit() {}
@@ -60,12 +81,17 @@ class _TrackingVoiceController extends VoiceController {
 void main() {
   setUp(() {
     Get.reset();
+    // The home screen's GPS→mic sequencing awaits the microphone probe;
+    // an unmocked permission_handler channel never resolves in widget
+    // tests, so resolve it as granted.
+    mockMicPermissionGranted();
     TtsService.setInstanceForTest(_FakeTtsService());
     Get.put<AuthController>(_TestAuthController(), permanent: true);
     Get.put<HomeController>(_TestHomeController(), permanent: true);
   });
 
   tearDown(() {
+    clearMicPermissionMock();
     TtsService.setInstanceForTest(TtsService());
     Get.reset();
   });
@@ -84,6 +110,41 @@ void main() {
     expect(vc.initSpeechCalls, 1);
 
     // Flush the welcome flow timers so nothing leaks between tests.
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('mic is asked only AFTER the GPS permission flow resolves '
+      '(one OS prompt at a time)', (tester) async {
+    final vc = _TrackingVoiceController();
+    Get.put<VoiceController>(vc, permanent: true);
+
+    // Swap the auto-completing HomeController (setUp) for one whose
+    // location-permission gate stays PENDING — simulating the GPS
+    // permission dialog still being on screen.
+    Get.delete<HomeController>(force: true);
+    final pendingHome = _PendingFlowHomeController();
+    Get.put<HomeController>(pendingHome, permanent: true);
+
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // The GPS prompt is unresolved → the mic must NOT be asked yet.
+    expect(vc.initSpeechCalls, 0,
+        reason: 'mic permission must wait for the GPS flow to resolve');
+
+    // The user answers the GPS dialog → the gate opens → the mic is asked
+    // right after, exactly once.
+    pendingHome.completeLocationPermissionFlowForTest();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(vc.initSpeechCalls, 1,
+        reason: 'mic permission is asked exactly once, right after GPS');
+
+    // Flush the welcome-flow timers so nothing leaks between tests.
     await tester.pump(const Duration(milliseconds: 1500));
     await tester.pump(const Duration(seconds: 5));
   });

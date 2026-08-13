@@ -11,6 +11,8 @@ import 'package:DrsListing/controllers/voice_controller.dart';
 import 'package:DrsListing/screens/main_shell.dart';
 import 'package:DrsListing/services/tts_service.dart';
 
+import '../helpers/mock_permissions.dart';
+
 /// Test doubles that skip the network/speech/location work their real
 /// counterparts start in onInit (mirrors the pattern in
 /// doctor_detail_screen_test.dart and about_screen_test.dart).
@@ -30,7 +32,12 @@ class _TestVoiceController extends VoiceController {
 class _TestHomeController extends HomeController {
   @override
   // ignore: must_call_super
-  void onInit() {}
+  void onInit() {
+    // The real controller opens the location-permission gate during its
+    // own init; the double skips that, so open it explicitly or the home
+    // screen's GPS→mic sequencing (which awaits this) would stall.
+    completeLocationPermissionFlowForTest();
+  }
 }
 
 class _TestAppointmentController extends AppointmentController {
@@ -66,6 +73,10 @@ void main() {
   setUp(() {
     // Start each test with a clean Get container.
     Get.reset();
+    // The home tab's GPS→mic sequencing awaits the microphone probe; an
+    // unmocked permission_handler channel never resolves in widget tests,
+    // so resolve it as granted.
+    mockMicPermissionGranted();
     TtsService.setInstanceForTest(_FakeTtsService());
     Get.put<VoiceController>(_TestVoiceController(), permanent: true);
     Get.put<AuthController>(_TestAuthController(), permanent: true);

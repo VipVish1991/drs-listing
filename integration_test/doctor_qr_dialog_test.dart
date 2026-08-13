@@ -5,7 +5,7 @@
 ///   flutter drive \
 ///     --driver=test_driver/doctor_qr_driver.dart \
 ///     --target=integration_test/doctor_qr_dialog_test.dart \
-///     -d <device>
+///     -d `<device>`
 ///
 /// The app must have been freshly installed (no stale session) so the
 /// splash routes to onboarding → login (the test also tolerates booting
@@ -59,7 +59,7 @@ Future<String> pumpUntilAnyFound(
 }
 
 void main() {
-  final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('DOCTOR: Book QR dialog renders the scannable booking QR',
       (tester) async {
