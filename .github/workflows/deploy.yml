@@ -41,15 +41,17 @@ jobs:
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        # Note: every line of the script is at the same indent so the
+        # heredoc terminator (EOF) lands at column 0 after YAML dedent.
         run: |
           if [ -n "$GOOGLE_MAPS_API_KEY" ]; then
-            cat > .env <<EOF
-            GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY
-            OPENAI_API_KEY=$OPENAI_API_KEY
-            GROQ_API_KEY=$GROQ_API_KEY
-            EOF
+          cat > .env <<EOF
+          GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY
+          OPENAI_API_KEY=$OPENAI_API_KEY
+          GROQ_API_KEY=$GROQ_API_KEY
+          EOF
           else
-            cp .env.example .env
+          cp .env.example .env
           fi
 
       - name: Build web
