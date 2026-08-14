@@ -20,6 +20,7 @@ import '../../widgets/appointment_details_sheet.dart';
 import '../../widgets/appointment_info_card.dart';
 import '../../widgets/appointment_search.dart';
 import '../../widgets/image_processing_dialog.dart';
+import '../../widgets/video_call_sheet.dart';
 
 class DoctorAppointmentsScreen extends StatefulWidget {
   const DoctorAppointmentsScreen({super.key});
@@ -492,6 +493,18 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
     showConfirmAppointmentDialog(_controller, a);
   }
 
+  /// Opens the shared Google Meet video-call sheet for a video consultation.
+  /// The clinic saves the link (stored on the appointment, so the patient
+  /// can join) and can share it to the patient's phone via WhatsApp/SMS.
+  void _openVideoCall(AppointmentModel a) {
+    VideoCallSheet.show(
+      appointment: a,
+      sharePhone: a.patientPhone,
+      isDoctor: true,
+      onSaveLink: (link) => _controller.saveMeetLink(a.appointmentId, link),
+    );
+  }
+
   /// "Mark Paid" confirm — only offered for OFFLINE payments still
   /// Pending (the clinic has actually received the cash). Online payments
   /// are settled at booking time and need no clinic action.
@@ -756,6 +769,34 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
       // Fee/payment recorded for this appointment (same map the cards use),
       // so the sheet shows what the consultation costs and how it stands.
       payment: _controller.paymentsByAppointment[a.appointmentId],
+      // Google Meet video call — only for VIDEO consultations (Tele is a
+      // phone call, Clinic is in person).
+      footerActions: [
+        if (a.isVideoConsultation)
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              key: const ValueKey('appointment_details_video_call'),
+              onPressed: () {
+                Get.back();
+                _openVideoCall(a);
+              },
+              icon: const Icon(Icons.videocam_rounded, size: 18),
+              label: const Text(
+                'Video Call',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.info,
+                side: BorderSide(color: AppColors.info.withAlpha(80)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -863,6 +904,9 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
               onCancel: () => _handleCancel(a),
               onConfirm: isPending ? () => _handleConfirm(a) : null,
               onComplete: () => _handleComplete(a),
+              onVideoCall: a.isVideoConsultation
+                  ? () => _openVideoCall(a)
+                  : null,
             );
           });
         },
@@ -907,6 +951,9 @@ class _ModernAppointmentCard extends StatelessWidget {
   final VoidCallback? onConfirm;
   final VoidCallback onComplete;
 
+  /// Opens the Google Meet video-call sheet (video consultations only).
+  final VoidCallback? onVideoCall;
+
   /// The payment recorded against this appointment (if any). Offline
   /// Pending rows render Mark Paid / Refund actions; every other status
   /// renders as an informational chip.
@@ -927,6 +974,7 @@ class _ModernAppointmentCard extends StatelessWidget {
     required this.onCancel,
     this.onConfirm,
     required this.onComplete,
+    this.onVideoCall,
     this.payment,
     this.onMarkPaid,
     this.onRefund,
@@ -981,6 +1029,14 @@ class _ModernAppointmentCard extends StatelessWidget {
                     spacing: 10,
                     runSpacing: 8,
                     children: [
+                      // Google Meet video call — video consultations only.
+                      if (onVideoCall != null)
+                        _ModernActionBtn(
+                          label: 'Video Call',
+                          icon: Icons.videocam_rounded,
+                          color: AppColors.info,
+                          onTap: onVideoCall!,
+                        ),
                       _ModernActionBtn(
                         label: 'Cancel',
                         icon: Icons.close_rounded,

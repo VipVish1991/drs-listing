@@ -345,6 +345,37 @@ doctors can opt out of reschedule alerts from **Profile → Notification
 Settings** — the "Reschedules" toggle next to the existing
 bookings/cancellations/status ones.
 
+## Google Meet Video Calls (free, no API keys)
+
+**VIDEO** consultations get a free Google Meet integration on both sides:
+
+- **Patient** (`My Appointments`) and **doctor** (Appointments tab) each see
+  a **Video Call** chip on the appointment card and a **Video Call** button
+  in the details sheet — only for `video` consultations (Tele is a phone
+  call, Clinic is in person).
+- Tapping it opens the shared **video-call sheet** (`lib/widgets/video_call_sheet.dart`):
+  - **Join Video Call** — opens the saved meeting link in the browser /
+    Google Meet app (`url_launcher`, `LaunchMode.externalApplication`).
+  - **Start New Meeting** — opens `https://meet.new` so **Google generates
+    a real link** (a made-up code like `abc-defg-hij` shows "invalid
+    meeting" — Google only accepts meet-generated codes, so the app never
+    invents one), then prompts to paste the link back.
+  - **Enter / Paste Link** — manual entry with a "Paste from clipboard"
+    shortcut (the user just copied it from meet.new).
+  - **Copy Link** and **Send to Patient/Doctor** — share the link over
+    **WhatsApp or SMS** with a pre-filled invite (the other party's number
+    is the appointment's stored patient/doctor phone), so both sides join
+    the same meeting.
+- The saved link is stored on the appointment (`appointments.meet_link`,
+  migration `supabase/migrations/20260814000004_add_meet_link.sql`);
+  either side can save/replace it, and the card + sheet update in place.
+  Guests join without a Google account — whoever starts the meeting
+  creates the link.
+
+Zero external setup: no Google Cloud project, no API keys, no OAuth, no
+WebView (Google Meet doesn't work reliably embedded in WebViews anyway —
+launching the browser/Meet app is the recommended approach).
+
 ## Payment History (filter bar)
 
 The patient's **Payment History** (Profile → Payment History) and the

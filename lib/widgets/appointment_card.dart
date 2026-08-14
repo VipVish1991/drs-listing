@@ -29,6 +29,9 @@ class AppointmentCard extends StatelessWidget {
   final VoidCallback? onMap;
   final VoidCallback? onCancel;
 
+  /// Opens the Google Meet video-call sheet (video consultations only).
+  final VoidCallback? onVideoCall;
+
   const AppointmentCard({
     super.key,
     required this.appointment,
@@ -37,6 +40,7 @@ class AppointmentCard extends StatelessWidget {
     this.onCall,
     this.onMap,
     this.onCancel,
+    this.onVideoCall,
   });
 
   // Same status color/icon mapping as the doctor side (single source of
@@ -108,12 +112,24 @@ class AppointmentCard extends StatelessWidget {
         extraRow: displayStatus == AppointmentStatus.pending
             ? _buildPendingBanner(statusColor)
             : null,
-        actions: (onCall != null || onMap != null || onCancel != null)
+        actions:
+            (onCall != null ||
+                    onMap != null ||
+                    onCancel != null ||
+                    onVideoCall != null)
             ? Wrap(
                 alignment: WrapAlignment.end,
                 spacing: 8,
                 runSpacing: 8,
                 children: [
+                  // Google Meet video call — video consultations only.
+                  if (onVideoCall != null)
+                    AppActionChip(
+                      icon: Icons.videocam_rounded,
+                      label: 'Video Call',
+                      color: AppColors.info,
+                      onTap: onVideoCall!,
+                    ),
                   if (onCall != null)
                     AppActionChip(
                       icon: Icons.call_rounded,

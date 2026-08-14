@@ -536,6 +536,31 @@ class AppointmentController extends GetxController {
     } catch (_) {}
   }
 
+  /// Save (or clear, when [link] is null) the Google Meet URL for a video
+  /// consultation. Updates the reactive list IN PLACE on success so the
+  /// card / details sheet reflect the link immediately (no full reload).
+  /// Returns `true` only when the write actually landed server-side.
+  Future<bool> saveMeetLink(String appointmentId, String? link) async {
+    final userId = _authController.currentUser.value?.id;
+    if (userId == null) return false;
+    try {
+      final ok = await _supabase.updateAppointmentMeetLink(
+        appointmentId,
+        link,
+        userId: userId,
+      );
+      if (ok) {
+        final i = appointments.indexWhere(
+          (a) => a.appointmentId == appointmentId,
+        );
+        if (i >= 0) appointments[i] = appointments[i].copyWith(meetLink: link);
+      }
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> completeAppointment(String appointmentId) async {
     final userId = _authController.currentUser.value?.id;
     if (userId == null) return;

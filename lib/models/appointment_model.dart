@@ -38,6 +38,12 @@ class AppointmentModel {
   /// Empty for appointments without a prescription yet.
   final List<String> prescriptionUrls;
 
+  /// The shared Google Meet URL for this appointment's video consultation
+  /// (`https://meet.google.com/xxx-xxxx-xxx`). Null until either side
+  /// starts a meeting and saves the link — the launcher+share integration
+  /// only stores REAL Google-generated links, never made-up codes.
+  final String? meetLink;
+
   /// Appointment date formatted for display as `dd-MM-yyyy` (e.g.
   /// "08-08-2026"), the format used across the app's UI. The raw
   /// [appointmentDate] stays `yyyy-MM-dd` for sorting/filtering.
@@ -58,6 +64,11 @@ class AppointmentModel {
   /// the only types where the doctor can attach a prescription.
   bool get isRemoteConsultation =>
       consultationType == 'tele' || consultationType == 'video';
+
+  /// Whether this appointment is a VIDEO consultation — the only type
+  /// that gets the Google Meet video-call actions (Tele is a phone call;
+  /// Clinic is in person).
+  bool get isVideoConsultation => consultationType == 'video';
 
   /// Human-readable label for [consultationType] (matches the booking
   /// screen's labels): 'Tele Consultation' | 'Video Consultation' |
@@ -95,6 +106,7 @@ class AppointmentModel {
     this.createdAt,
     this.consultationType,
     this.prescriptionUrls = const [],
+    this.meetLink,
   });
 
   factory AppointmentModel.fromJson(Map<String, dynamic> json) {
@@ -139,6 +151,7 @@ class AppointmentModel {
           ? json['consultation_type'].toString()
           : null,
       prescriptionUrls: _parsePrescriptionUrls(json['upload_prescription']),
+      meetLink: TextSanitizer.sanitize(json['meet_link']?.toString()),
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'].toString())
           : null,
@@ -187,11 +200,16 @@ class AppointmentModel {
       'status': status,
       'consultation_type': consultationType,
       if (prescriptionUrls.isNotEmpty) 'upload_prescription': prescriptionUrls,
+      if (meetLink != null && meetLink!.isNotEmpty) 'meet_link': meetLink,
       'created_at': createdAt?.toIso8601String(),
     };
   }
 
-  AppointmentModel copyWith({String? status, List<String>? prescriptionUrls}) {
+  AppointmentModel copyWith({
+    String? status,
+    List<String>? prescriptionUrls,
+    String? meetLink,
+  }) {
     return AppointmentModel(
       appointmentId: appointmentId,
       userId: userId,
@@ -207,6 +225,7 @@ class AppointmentModel {
       status: status ?? this.status,
       consultationType: consultationType,
       prescriptionUrls: prescriptionUrls ?? this.prescriptionUrls,
+      meetLink: meetLink ?? this.meetLink,
       createdAt: createdAt,
     );
   }

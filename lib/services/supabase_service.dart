@@ -455,6 +455,36 @@ class SupabaseService {
     );
   }
 
+  /// Save (or clear, when [link] is null/empty) the Google Meet URL for a
+  /// video consultation. Runs with the `x-user-id` header — both the
+  /// booking patient and the owning clinic pass their own user id, which
+  /// the owner-scoped appointments UPDATE policy accepts (it is
+  /// column-agnostic). Returns `true` only when the row actually came
+  /// back, so the UI never claims the link was saved that wasn't.
+  Future<bool> updateAppointmentMeetLink(
+    String appointmentId,
+    String? link, {
+    required String userId,
+  }) async {
+    try {
+      final value = (link ?? '').trim().isEmpty ? null : link!.trim();
+      final rows = await _withUsersContext(
+        usersContextHeaders(userId: userId),
+        () => client
+            .from('appointments')
+            .update({'meet_link': value})
+            .eq('appointment_id', appointmentId)
+            .select(),
+      );
+      return rows.isNotEmpty;
+    } catch (e) {
+      // The meet_link column may not exist yet if the migration hasn't
+      // been applied — never crash the video-call sheet over it.
+      debugPrint('⚠️ [updateAppointmentMeetLink] failed: $e');
+      return false;
+    }
+  }
+
   /// Move an appointment to a new date/time slot (patient reschedule).
   ///
   /// Updates only the slot-defining columns: `appointment_date`,

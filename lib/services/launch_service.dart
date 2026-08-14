@@ -76,8 +76,10 @@ class LaunchService {
   ///
   /// Expects a full phone number including country code (e.g. "+919876543210").
   /// Strips non-digit characters and prefixes with country code 91 if none
-  /// is detected.
-  static Future<void> whatsApp(String? phone) async {
+  /// is detected. An optional [message] is pre-filled in the chat
+  /// (wa.me/?text= — ignored when the platform's URL encoding can't
+  /// represent it, which is fine).
+  static Future<void> whatsApp(String? phone, {String? message}) async {
     if (phone == null || phone.isEmpty) return;
 
     // Strip all non-digit characters
@@ -85,7 +87,10 @@ class LaunchService {
     // Ensure at least 10 digits; if exactly 10, assume India (+91)
     final clean = digits.length == 10 ? '91$digits' : digits;
 
-    final uri = Uri.parse('https://wa.me/$clean');
+    final uri = Uri.parse(
+      'https://wa.me/$clean'
+      '${message != null && message.trim().isNotEmpty ? '?text=${Uri.encodeComponent(message.trim())}' : ''}',
+    );
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
