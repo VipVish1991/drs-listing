@@ -72,8 +72,8 @@ String _dayKey(int daysFromNow) {
 }
 
 void main() {
-  testWidgets('shows the one-doctor-at-a-time banner while the patient '
-      'holds an active booking', (tester) async {
+  testWidgets('shows the active-booking notice while the patient holds an '
+      'active booking', (tester) async {
     await _pumpScreen(tester, [
       appointmentBasic(
         appointmentId: 'APT_ACTIVE',
@@ -85,9 +85,10 @@ void main() {
       ),
     ]);
 
-    // The amber gate notice explains the rule right above the list.
+    // The amber notice explains the rule right above the list (no doctor
+    // context here — the neutral per-doctor wording).
     expect(
-      find.textContaining('already have an appointment booked'),
+      find.textContaining('Complete or cancel it'),
       findsOneWidget,
     );
     expect(find.byType(BookingBlockBanner), findsOneWidget);
@@ -98,8 +99,10 @@ void main() {
     await _settleAnimations(tester);
   });
 
-  testWidgets('shows the 12h-cooldown banner for a recently completed '
-      'booking', (tester) async {
+  testWidgets('shows no notice for a recently completed booking '
+      '(no cooldown)', (tester) async {
+    // Completed bookings no longer trigger a wait — the same doctor can
+    // be re-booked immediately, so no banner appears even right after.
     await _pumpScreen(tester, [
       appointmentBasic(
         appointmentId: 'APT_DONE',
@@ -111,15 +114,7 @@ void main() {
       ),
     ]);
 
-    expect(
-      find.textContaining('12 hours after your last booking'),
-      findsOneWidget,
-    );
-    // The active-booking wording is NOT the message here.
-    expect(
-      find.textContaining('already have an appointment booked'),
-      findsNothing,
-    );
+    expect(find.byType(BookingBlockBanner), findsNothing);
 
     await _settleAnimations(tester);
   });
@@ -127,8 +122,7 @@ void main() {
   testWidgets('hides the banner when the patient is free to book again', (
     tester,
   ) async {
-    // A Completed booking older than 12h (or an empty history) must not
-    // show any gate notice.
+    // A Completed booking (or an empty history) must not show any notice.
     await _pumpScreen(tester, [
       appointmentBasic(
         appointmentId: 'APT_OLD',
@@ -170,7 +164,7 @@ void main() {
 
     expect(find.byType(BookingBlockBanner), findsOneWidget);
     expect(
-      find.textContaining('already have an appointment booked'),
+      find.textContaining('Complete or cancel it'),
       findsOneWidget,
     );
 

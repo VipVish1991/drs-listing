@@ -16,8 +16,14 @@ import '../../widgets/app_button.dart';
 
 /// OTP verification screen used for both patient and doctor registration.
 ///
-/// Uses the development OTP `1111` (pre-filled) for verification — no SMS
-/// is sent. After a successful verification the user is registered with
+/// Server-verified OTP: the screen mints a fresh code via
+/// [AuthService.requestOtp] (demo mode — the server returns the code so
+/// the app can display it; no SMS is sent) and verifies it via
+/// [AuthService.verifyOtp] before registering. There is NO universal
+/// hardcoded code: each code is unique, expires in 10 minutes, is
+/// single-use, and allows 5 attempts.
+///
+/// After a successful verification the user is registered with
 /// [AuthService.register] and routed to the role-appropriate destination.
 ///
 /// When [doctor] is provided (registration mode), the user picked their
@@ -53,8 +59,9 @@ class OtpVerificationScreen extends StatefulWidget {
 }
 
 class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
-  /// Development OTP — no SMS is sent; this fixed code verifies.
-  static const String _defaultOtp = '1111';
+  /// The server-minted OTP (demo mode — displayed to the user). Fetched
+  /// in [initState] (and on resend) via [AuthService.requestOtp].
+  String? _serverOtp;
 
   final TextEditingController _pinController = TextEditingController();
   final FocusNode _pinFocusNode = FocusNode();
@@ -63,8 +70,15 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   int _resendTimer = 15;
   bool _canResend = false;
 
-  /// The dev OTP is 4 digits.
-  int get _pinLength => 4;
+  /// True while [_loadOtp] is programmatically filling the field.
+  /// PinCodeTextField fires onChanged when the controller text is set on
+  /// an attached field, which would auto-submit the pre-filled code the
+  /// moment the screen opens (before the user has a chance to confirm).
+  /// Guarded so auto-submit only ever fires on genuine user input.
+  bool _isPrefilling = false;
+
+  /// The server OTP is 6 digits.
+  int get _pinLength => 6;
 
   /// Registration service used by [_verifyOtp]. Defaults to the real
   /// singleton; tests inject a fake via [OtpVerificationScreen.authService].
@@ -73,9 +87,37 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   @override
   void initState() {
     super.initState();
-    // Pre-fill the default OTP for convenience.
-    _pinController.text = _defaultOtp;
     _startResendTimer();
+    // Mint a fresh server OTP and pre-fill it (demo mode — the code is
+    // returned so the app can display it). Non-fatal: on failure the
+    // screen still renders with an empty field and a friendly message.
+    _loadOtp();
+  }
+
+  /// Mint a fresh OTP from the server and pre-fill the pin field.
+  /// Best-effort — a failure leaves the field empty (the user can hit
+  /// Resend) instead of blocking the screen.
+  Future<void> _loadOtp() async {
+    final otp = await _authService.requestOtp(widget.mobile);
+    if (!mounted) return;
+    setState(() {
+      _serverOtp = otp;
+      _errorMessage = otp == null
+          ? 'Could not load a verification code. Please tap Resend OTP.'
+          : null;
+    });
+    if (otp != null) {
+      _isPrefilling = true;
+      _pinController.text = otp;
+      // Keep the cursor at the end of the pre-filled code.
+      _pinController.selection = TextSelection.collapsed(
+        offset: _pinController.text.length,
+      );
+      // Let the field rebuild with the new text, then re-arm user input.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _isPrefilling = false;
+      });
+    }
   }
 
   @override
@@ -119,17 +161,22 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       return;
     }
 
-    if (otp != _defaultOtp) {
-      setState(() {
-        _errorMessage = 'Invalid OTP. Please try again.';
-      });
-      return;
-    }
-
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
+
+    // Server-side verification — no universal code. The server checks
+    // correctness, expiry, attempt limit, and single-use.
+    final verified = await _authService.verifyOtp(widget.mobile, otp);
+    if (!mounted) return;
+    if (!verified) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Invalid OTP. Please try again.';
+      });
+      return;
+    }
 
     await _proceedWithVerifiedNumber();
   }
@@ -137,14 +184,16 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   /// True when [otp] has exactly [_pinLength] digits (the complete code).
   bool _isCompleteOtp(String otp) {
     return otp.length == _pinLength &&
-        RegExp(r'^[0-9]{4}$').hasMatch(otp);
+        RegExp(r'^[0-9]{6}$').hasMatch(otp);
   }
 
   /// Fires [_verifyOtp] automatically once the entered code is complete
   /// (4 digits) — no Verify tap needed. Gated so it can never race the
   /// button.
   void _autoSubmitIfComplete() {
-    if (_isLoading) return;
+    // Programmatic pre-fill (the demo code arriving from the server) must
+    // NOT auto-submit — only genuine user input can.
+    if (_isLoading || _isPrefilling) return;
     final otp = _pinController.text;
     if (!_isCompleteOtp(otp)) return;
     FocusScope.of(context).unfocus();
@@ -278,10 +327,12 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   void _resendOtp() {
-    // Dev flow: re-fill the default code (no SMS is involved).
-    _pinController.text = _defaultOtp;
+    // Server flow: mint a fresh code and pre-fill it (demo mode — the
+    // code is returned so the app can display it).
     setState(() => _errorMessage = null);
-    showSuccessSnackbar('Default OTP 1111 is pre-filled');
+    _pinController.clear();
+    _loadOtp();
+    showSuccessSnackbar('A new verification code has been generated');
     _startResendTimer();
   }
 
@@ -365,8 +416,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
                 const SizedBox(height: 8),
 
-                // Subtitle — no SMS is sent (dev OTP 1111), so the copy
-                // asks for the code rather than claiming one was sent.
+                // Subtitle — demo mode (no SMS), so the copy asks for the
+                // code rather than claiming one was sent.
                 RichText(
                   text: TextSpan(
                     style: TextStyle(fontSize: 16, color: bodyColor),
@@ -447,7 +498,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
                 const SizedBox(height: 12),
 
-                // Hint pill: shows the pre-filled default OTP.
+                // Hint pill: shows the pre-filled demo OTP (no SMS is
+                // sent — the code is returned by the server for display).
                 Center(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -468,7 +520,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          'Use default OTP: $_defaultOtp',
+                          _serverOtp == null
+                              ? 'Requesting code…'
+                              : 'Demo OTP: $_serverOtp',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppColors.accent.withAlpha(200),

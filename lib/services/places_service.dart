@@ -130,6 +130,15 @@ class PlacesService {
   /// environment variable) and should NOT be sent from the client.
   bool get _useProxy => AppConstants.placesProxyUrl.isNotEmpty;
 
+  /// Add the shared proxy token to [params] when the server-side proxy is
+  /// active. The places-proxy Edge Function rejects requests without the
+  /// matching `token` (stops random traffic burning the Google API quota).
+  /// When calling Google directly (no proxy), params pass through untouched.
+  Map<String, String> _proxyParams(Map<String, String> params) {
+    if (!_useProxy) return params;
+    return {...params, 'token': AppConstants.placesProxyToken};
+  }
+
   /// ────────────────────────────────────────────────────────────────
   /// Nearby Healthcare Search – uses Google Places Text Search API
   /// ────────────────────────────────────────────────────────────────
@@ -193,7 +202,7 @@ class PlacesService {
 
       final uri = Uri.parse(
         '$_apiBaseUrl/textsearch/json',
-      ).replace(queryParameters: queryParams);
+      ).replace(queryParameters: _proxyParams(queryParams));
 
       debugPrint('🔍 Google Places Text Search: $uri');
 
@@ -306,7 +315,7 @@ class PlacesService {
 
       final uri = Uri.parse(
         '$_apiBaseUrl/textsearch/json',
-      ).replace(queryParameters: queryParams);
+      ).replace(queryParameters: _proxyParams(queryParams));
 
       debugPrint('🔍 Google Places Text Search: $uri');
 
@@ -417,7 +426,7 @@ class PlacesService {
       }
       final uri = Uri.parse(
         '$_apiBaseUrl/details/json',
-      ).replace(queryParameters: params);
+      ).replace(queryParameters: _proxyParams(params));
 
       final response = await _client.get(uri).timeout(
         const Duration(seconds: 15),

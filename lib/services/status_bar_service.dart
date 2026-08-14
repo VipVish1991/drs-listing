@@ -5,7 +5,7 @@ import '../config/theme.dart';
 /// Applies the system status bar (and navigation bar) colors and icon
 /// brightness using the `flutter_statusbarcolor_ns` plugin.
 ///
-/// The status bar is solid BLACK across the whole app (with white icons)
+/// The status bar is WHITE across the whole app (with black icons/text)
 /// regardless of the screen behind it — matching the app-wide
 /// `SystemUiOverlayStyle` in the theme. Only the system navigation bar
 /// still follows the screen's brightness ([isDark]).
@@ -23,19 +23,19 @@ class StatusBarService {
     );
   }
 
-  /// Applies the solid black status bar with white icons on every screen
+  /// Applies the white status bar with black icons/text on every screen
   /// (the whole-app design), and keeps the system navigation bar
   /// consistent with the theme. [background] is accepted for call-site
-  /// compatibility only — the status bar is always black.
+  /// compatibility only — the status bar is always white.
   static Future<void> apply({
     required Color background,
     required bool isDark,
   }) async {
     try {
-      // Black status bar across the whole app with white icons — the
+      // White status bar across the whole app with black icons — the
       // screen's own background color never shows through.
-      await FlutterStatusbarcolor.setStatusBarColor(Colors.black);
-      await FlutterStatusbarcolor.setStatusBarWhiteForeground(true);
+      await FlutterStatusbarcolor.setStatusBarColor(Colors.white);
+      await FlutterStatusbarcolor.setStatusBarWhiteForeground(false);
 
       final navBarColor = isDark ? const Color(0xFF111318) : AppColors.bgMain;
       await FlutterStatusbarcolor.setNavigationBarColor(navBarColor);

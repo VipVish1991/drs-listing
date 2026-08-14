@@ -110,6 +110,44 @@ class SupabaseService {
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // OTP verification (server-side, replaces the old hardcoded 1111)
+  // ═══════════════════════════════════════════════════════════════
+  /// Mint a fresh OTP for [mobile] via the `request_otp` RPC and return
+  /// the code. DEMO MODE: the RPC returns the code so the app can display
+  /// it (no SMS provider is wired up). Returns `null` on any failure
+  /// (network, cooldown, invalid mobile) so screens can degrade gracefully
+  /// instead of crashing.
+  Future<String?> requestOtp(String mobile) async {
+    try {
+      final result = await client.rpc('request_otp', params: {
+        'p_mobile': mobile,
+      });
+      return result as String?;
+    } catch (e) {
+      debugPrint('⚠️ [requestOtp] failed: $e');
+      return null;
+    }
+  }
+
+  /// Verify [otp] against the server for [mobile] via the `verify_otp`
+  /// RPC. Returns `true` only when the server accepted the code (correct,
+  /// unexpired, within attempt limit, single-use). Returns `false` on a
+  /// wrong/expired code OR a network failure — the caller can't tell the
+  /// difference, so screens treat both as "verification failed".
+  Future<bool> verifyOtp(String mobile, String otp) async {
+    try {
+      final result = await client.rpc('verify_otp', params: {
+        'p_mobile': mobile,
+        'p_otp': otp,
+      });
+      return result == true;
+    } catch (e) {
+      debugPrint('⚠️ [verifyOtp] failed: $e');
+      return false;
+    }
+  }
+
   /// Register (or refresh) an FCM device token on the caller's own row.
   /// Multi-device safe: the add_device_token RPC dedupes per token, so a
   /// re-login refreshes instead of duplicating. Runs with the x-user-id
@@ -398,35 +436,56 @@ class SupabaseService {
   // ═══════════════════════════════════════════════════════════════
   // Appointments table
   // ═══════════════════════════════════════════════════════════════
+  /// The caller's appointments (patient). Runs with the `x-user-id`
+  /// header so the owner-scoped appointments SELECT policy returns only
+  /// the caller's own rows.
   Future<List<Map<String, dynamic>>> getUserAppointments(String userId) async {
-    final response = await client
-        .from('appointments')
-        .select()
-        .eq('user_id', userId)
-        .order('created_at', ascending: false)
-        .timeout(const Duration(seconds: 10));
+    final response = await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client
+          .from('appointments')
+          .select()
+          .eq('user_id', userId)
+          .order('created_at', ascending: false)
+          .timeout(const Duration(seconds: 10)),
+    );
     return response;
   }
 
+  /// Create an appointment on the caller's own behalf. Runs with the
+  /// `x-user-id` header (from `data['user_id']`) so the owner-scoped
+  /// INSERT policy accepts it.
   Future<Map<String, dynamic>> createAppointment(
     Map<String, dynamic> data,
   ) async {
-    final response = await client
-        .from('appointments')
-        .insert(data)
-        .select()
-        .single();
+    final response = await _withUsersContext(
+      usersContextHeaders(userId: data['user_id']?.toString()),
+      () => client
+          .from('appointments')
+          .insert(data)
+          .select()
+          .single(),
+    );
     return response;
   }
 
+  /// Flip an appointment's status. Runs with the `x-user-id` header —
+  /// both the patient (own cancel) and the clinic (Confirm/Complete/
+  /// Cancel) pass their own user id, which the owner-scoped UPDATE
+  /// policy matches against the appointment's patient or the clinic's
+  /// doctors row.
   Future<void> updateAppointmentStatus(
     String appointmentId,
-    String status,
-  ) async {
-    await client
-        .from('appointments')
-        .update({'status': status})
-        .eq('appointment_id', appointmentId);
+    String status, {
+    required String userId,
+  }) async {
+    await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client
+          .from('appointments')
+          .update({'status': status})
+          .eq('appointment_id', appointmentId),
+    );
   }
 
   /// Move an appointment to a new date/time slot (patient reschedule).
@@ -456,17 +515,20 @@ class SupabaseService {
     String? consultationType,
   }) async {
     try {
-      final rows = await client
-          .from('appointments')
-          .update({
-            'appointment_date': date,
-            'appointment_time': time,
-            if (consultationType != null && consultationType.isNotEmpty)
-              'consultation_type': consultationType,
-          })
-          .eq('appointment_id', appointmentId)
-          .eq('user_id', userId)
-          .select();
+      final rows = await _withUsersContext(
+        usersContextHeaders(userId: userId),
+        () => client
+            .from('appointments')
+            .update({
+              'appointment_date': date,
+              'appointment_time': time,
+              if (consultationType != null && consultationType.isNotEmpty)
+                'consultation_type': consultationType,
+            })
+            .eq('appointment_id', appointmentId)
+            .eq('user_id', userId)
+            .select(),
+      );
       return rows.isNotEmpty;
     } catch (e) {
       // The slot-rule trigger raised appointments_slot_occupied (or any
@@ -491,21 +553,25 @@ class SupabaseService {
   /// taken — never crashes.
   Future<bool> rescheduleAppointmentAsDoctor(
     String appointmentId, {
+    required String userId,
     required String date,
     required String time,
     String? consultationType,
   }) async {
     try {
-      final rows = await client
-          .from('appointments')
-          .update({
-            'appointment_date': date,
-            'appointment_time': time,
-            if (consultationType != null && consultationType.isNotEmpty)
-              'consultation_type': consultationType,
-          })
-          .eq('appointment_id', appointmentId)
-          .select();
+      final rows = await _withUsersContext(
+        usersContextHeaders(userId: userId),
+        () => client
+            .from('appointments')
+            .update({
+              'appointment_date': date,
+              'appointment_time': time,
+              if (consultationType != null && consultationType.isNotEmpty)
+                'consultation_type': consultationType,
+            })
+            .eq('appointment_id', appointmentId)
+            .select(),
+      );
       return rows.isNotEmpty;
     } catch (e) {
       // The slot-rule trigger raised appointments_slot_occupied (or any
@@ -521,13 +587,17 @@ class SupabaseService {
   /// time). Combined with [updateAppointmentStatus] by the controller.
   Future<void> addPrescriptionUrls(
     String appointmentId,
-    List<String> urls,
-  ) async {
+    List<String> urls, {
+    required String userId,
+  }) async {
     if (urls.isEmpty) return;
-    await client
-        .from('appointments')
-        .update({'upload_prescription': urls})
-        .eq('appointment_id', appointmentId);
+    await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client
+          .from('appointments')
+          .update({'upload_prescription': urls})
+          .eq('appointment_id', appointmentId),
+    );
   }
 
   /// Upload a prescription photo to the booking-page Edge Function, which
@@ -603,27 +673,36 @@ class SupabaseService {
       );
     }
 
-    await client.from('saved_doctors').insert({
-      'user_id': userId,
-      'doctor_data': doctorData,
-    });
+    await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client.from('saved_doctors').insert({
+        'user_id': userId,
+        'doctor_data': doctorData,
+      }),
+    );
   }
 
   Future<List<Map<String, dynamic>>> getSavedDoctors(String userId) async {
-    final response = await client
-        .from('saved_doctors')
-        .select()
-        .eq('user_id', userId)
-        .order('created_at', ascending: false);
+    final response = await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client
+          .from('saved_doctors')
+          .select()
+          .eq('user_id', userId)
+          .order('created_at', ascending: false),
+    );
     return response;
   }
 
   Future<void> removeSavedDoctorByPlaceId(String userId, String placeId) async {
-    await client
-        .from('saved_doctors')
-        .delete()
-        .eq('user_id', userId)
-        .filter('doctor_data->>place_id', 'eq', placeId);
+    await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client
+          .from('saved_doctors')
+          .delete()
+          .eq('user_id', userId)
+          .filter('doctor_data->>place_id', 'eq', placeId),
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -636,6 +715,11 @@ class SupabaseService {
   /// **Null-value filtering:** Columns that the doctor does not have
   /// (e.g. `userId == null`) are removed from the payload so the upsert
   /// doesn't reset existing DB values to `null`.
+  ///
+  /// **Owner scoping:** runs with the `x-user-id` header so the
+  /// owner-scoped doctors INSERT/UPDATE policies accept the write — the
+  /// caller must be the user connected to this clinic (or the first
+  /// connector adopting a legacy NULL-user_id row).
   Future<Map<String, dynamic>> saveDoctorToDb(DoctorModel doctor) async {
     final data = doctor.toJson();
     data.remove('distance');
@@ -662,11 +746,14 @@ class SupabaseService {
     // DB data with nulls on upsert.
     data.removeWhere((_, v) => v == null);
 
-    final response = await client
-        .from('doctors')
-        .upsert(data, onConflict: 'place_id')
-        .select()
-        .single();
+    final response = await _withUsersContext(
+      usersContextHeaders(userId: doctor.userId),
+      () => client
+          .from('doctors')
+          .upsert(data, onConflict: 'place_id')
+          .select()
+          .single(),
+    );
     return response;
   }
 
@@ -684,28 +771,39 @@ class SupabaseService {
   /// Persist a doctor's unavailable date ranges (leave / holiday) without
   /// touching any other column. Deliberately separate from the generic
   /// profile upsert ([saveDoctorToDb]) so Places-enriched saves never wipe
-  /// the ranges.
+  /// the ranges. Owner-scoped via [userId] (the connected clinic user).
   Future<void> saveDoctorUnavailableRanges(
     String doctorPlaceId,
-    List<UnavailableRange> ranges,
-  ) async {
-    await client
-        .from('doctors')
-        .update({'unavailable_ranges': ranges.map((r) => r.toJson()).toList()})
-        .eq('place_id', doctorPlaceId);
+    List<UnavailableRange> ranges, {
+    String? userId,
+  }) async {
+    await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client
+          .from('doctors')
+          .update({'unavailable_ranges': ranges.map((r) => r.toJson()).toList()})
+          .eq('place_id', doctorPlaceId),
+    );
   }
 
   /// Persist the doctor's UPI VPA (the address that receives online
   /// consultation fees) without touching any other column. A null/empty
-  /// [upiId] clears it so the booking flow falls back to the app-wide
-  /// default VPA. Mirrors [saveDoctorUnavailableRanges] so Places-enriched
-  /// saves never wipe doctor-set payment details.
-  Future<void> saveDoctorUpiId(String doctorPlaceId, String? upiId) async {
+  /// [upiId] clears it. Mirrors [saveDoctorUnavailableRanges] so
+  /// Places-enriched saves never wipe doctor-set payment details.
+  /// Owner-scoped via [userId] (the connected clinic user).
+  Future<void> saveDoctorUpiId(
+    String doctorPlaceId,
+    String? upiId, {
+    String? userId,
+  }) async {
     final value = (upiId ?? '').trim().isEmpty ? null : upiId!.trim();
-    await client
-        .from('doctors')
-        .update({'upi_id': value})
-        .eq('place_id', doctorPlaceId);
+    await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client
+          .from('doctors')
+          .update({'upi_id': value})
+          .eq('place_id', doctorPlaceId),
+    );
   }
 
   /// Get all doctors linked to a specific user by [userId].
@@ -761,30 +859,39 @@ class SupabaseService {
   /// not yet applied), falls back to delete + insert.
   Future<DoctorSlot> saveDoctorSlot(DoctorSlot slot) async {
     try {
-      final response = await client
-          .from('doctor_slots')
-          .upsert(
-            slot.toJson(),
-            onConflict: 'doctor_place_id,day_of_week,schedule_type',
-          )
-          .select()
-          .single();
+      final response = await _withUsersContext(
+        usersContextHeaders(userId: slot.userId),
+        () => client
+            .from('doctor_slots')
+            .upsert(
+              slot.toJson(),
+              onConflict: 'doctor_place_id,day_of_week,schedule_type',
+            )
+            .select()
+            .single(),
+      );
       return DoctorSlot.fromJson(response);
     } catch (e) {
       // If the upsert fails (e.g. constraint doesn't exist), fall back
       // to explicit delete + insert.
       debugPrint('⚠️ [saveDoctorSlot] Upsert failed, trying delete+insert: $e');
-      await client
-          .from('doctor_slots')
-          .delete()
-          .eq('doctor_place_id', slot.doctorPlaceId)
-          .eq('day_of_week', slot.dayOfWeek)
-          .eq('schedule_type', slot.scheduleType);
-      final response = await client
-          .from('doctor_slots')
-          .insert(slot.toJson())
-          .select()
-          .single();
+      await _withUsersContext(
+        usersContextHeaders(userId: slot.userId),
+        () => client
+            .from('doctor_slots')
+            .delete()
+            .eq('doctor_place_id', slot.doctorPlaceId)
+            .eq('day_of_week', slot.dayOfWeek)
+            .eq('schedule_type', slot.scheduleType),
+      );
+      final response = await _withUsersContext(
+        usersContextHeaders(userId: slot.userId),
+        () => client
+            .from('doctor_slots')
+            .insert(slot.toJson())
+            .select()
+            .single(),
+      );
       return DoctorSlot.fromJson(response);
     }
   }
@@ -814,16 +921,25 @@ class SupabaseService {
   }
 
   /// Delete a single slot row by its UUID.
-  Future<void> deleteDoctorSlot(String slotId) async {
-    await client.from('doctor_slots').delete().eq('id', slotId);
+  Future<void> deleteDoctorSlot(String slotId, {String? userId}) async {
+    await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client.from('doctor_slots').delete().eq('id', slotId),
+    );
   }
 
   /// Delete all slots for a doctor (e.g. before re-saving the whole week).
-  Future<void> deleteAllDoctorSlots(String doctorPlaceId) async {
-    await client
-        .from('doctor_slots')
-        .delete()
-        .eq('doctor_place_id', doctorPlaceId);
+  Future<void> deleteAllDoctorSlots(
+    String doctorPlaceId, {
+    String? userId,
+  }) async {
+    await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client
+          .from('doctor_slots')
+          .delete()
+          .eq('doctor_place_id', doctorPlaceId),
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -834,19 +950,51 @@ class SupabaseService {
   /// `doctor_place_id` column (faster than JSONB traversal).
   /// Falls back to JSONB `doctor_details->>place_id` filtering for rows
   /// created before the migration was applied.
+  /// Get all appointments for a doctor by filtering on the indexed
+  /// `doctor_place_id` column (faster than JSONB traversal).
+  ///
+  /// Runs with the `x-user-id` header — the owner-scoped appointments
+  /// SELECT policy lets the CLINIC (a doctors row whose user_id is the
+  /// caller) read its own bookings, so [userId] must be the connected
+  /// clinic owner's user id.
+  ///
+  /// ⚠️ NOT for the patient booking screen: it needs only which slots are
+  /// taken (not other patients' rows) — use [getBookedSlotKeys] instead.
   Future<List<Map<String, dynamic>>> getDoctorAppointments(
-    String doctorPlaceId,
-  ) async {
-    final response = await client
-        .from('appointments')
-        .select()
-        .or(
-          'doctor_place_id.eq.$doctorPlaceId,'
-          'doctor_details->>place_id.eq.$doctorPlaceId',
-        )
-        .order('created_at', ascending: false)
-        .timeout(const Duration(seconds: 10));
+    String doctorPlaceId, {
+    required String userId,
+  }) async {
+    final response = await _withUsersContext(
+      usersContextHeaders(userId: userId),
+      () => client
+          .from('appointments')
+          .select()
+          .or(
+            'doctor_place_id.eq.$doctorPlaceId,'
+            'doctor_details->>place_id.eq.$doctorPlaceId',
+          )
+          .order('created_at', ascending: false)
+          .timeout(const Duration(seconds: 10)),
+    );
     return response;
+  }
+
+  /// The booking screen's single allowed peek into a clinic's bookings:
+  /// returns ONLY the `date|time` keys of non-Cancelled appointments for
+  /// [doctorPlaceId] (no patient data). Backed by the SECURITY DEFINER
+  /// `get_booked_slot_keys` RPC so the owner-scoped appointments SELECT
+  /// never leaks other patients' rows to the booking flow.
+  Future<Set<String>> getBookedSlotKeys(String doctorPlaceId) async {
+    try {
+      final result = await client.rpc('get_booked_slot_keys', params: {
+        'p_doctor_place_id': doctorPlaceId,
+      });
+      final keys = result as List<dynamic>? ?? const [];
+      return keys.map((k) => k.toString()).toSet();
+    } catch (e) {
+      debugPrint('⚠️ [getBookedSlotKeys] failed: $e');
+      return <String>{};
+    }
   }
 
   /// Get a summary of appointments for a doctor (today's count, total,
@@ -858,9 +1006,10 @@ class SupabaseService {
   /// appointment (Pending / Upcoming / Completed / …) except Cancelled
   /// ones, and only a Cancelled appointment frees its slot.
   Future<Map<String, int>> getDoctorAppointmentStats(
-    String doctorPlaceId,
-  ) async {
-    final all = await getDoctorAppointments(doctorPlaceId);
+    String doctorPlaceId, {
+    required String userId,
+  }) async {
+    final all = await getDoctorAppointments(doctorPlaceId, userId: userId);
 
     final now = DateTime.now();
     final todayKey =

@@ -272,14 +272,16 @@ class _AppointmentHistoryScreenState extends State<AppointmentHistoryScreen> {
                   .fadeIn(duration: 350.ms, delay: 120.ms)
                   .slideY(begin: -0.08, end: 0, duration: 350.ms),
 
-            // ── One-doctor-at-a-time gate notice ──
-            // While the patient can't book right now (an active
-            // Pending/Upcoming booking, or within the 12h cooldown from
-            // their most recent booking) the same amber notice the
-            // booking screen shows explains the block — so the history
-            // screen never surprises the patient about why their next
-            // booking attempt fails. Reactive: appears/disappears as the
-            // appointment list changes (e.g. right after a cancellation).
+            // ── Active-booking notice ──
+            // While the patient holds ANY active (Pending/Upcoming)
+            // booking, the same amber notice family explains that the
+            // same doctor can't be re-booked until it's completed or
+            // cancelled (booking with OTHER doctors stays allowed) — so
+            // the history screen never surprises the patient about why
+            // their next attempt at that doctor fails. Reactive:
+            // appears/disappears as the appointment list changes (e.g.
+            // right after a cancellation). No doctor context here, so
+            // the call omits doctorPlaceId — the neutral notice path.
             Obx(() {
               final blockMessage = AppointmentController.bookingBlockMessage(
                 _controller.appointments,

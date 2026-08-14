@@ -11,6 +11,7 @@ import '../../routes/app_routes.dart';
 import '../../services/location_service.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/places_service.dart';
+import '../../services/supabase_service.dart';
 import '../../models/doctor_model.dart';
 import '../../utils/distance_formatter.dart';
 import '../../utils/place_type.dart';
@@ -80,6 +81,13 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
   String _regMobile = '';
   String _regRole = UserModel.roleDoctor;
 
+  /// True when the registration mobile already belongs to a registered
+  /// doctor (a `users` row with role 'doctor'). When set, the "Select &
+  /// Continue" button is disabled — the doctor already manages a clinic
+  /// and shouldn't re-register (they should log in instead). Reactive so
+  /// the card buttons + notice update as soon as the check lands.
+  final RxBool _registrationBlocked = false.obs;
+
   /// Debounce timer for text search — waits 400ms after the user stops
   /// typing before firing the API call.
   Timer? _searchDebounce;
@@ -106,7 +114,25 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
   void initState() {
     super.initState();
     _readArgs();
+    if (_registrationMode) {
+      _checkDoctorAlreadyRegistered();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadNearbyPlaces());
+  }
+
+  /// In registration mode, check whether the entered mobile number is
+  /// already a registered doctor. If it is, "Select & Continue" is
+  /// disabled (with an explanatory notice) so the doctor can't create a
+  /// duplicate clinic profile. Fails open — a check error (offline,
+  /// uninitialized Supabase) never blocks a legitimate registration.
+  Future<void> _checkDoctorAlreadyRegistered() async {
+    try {
+      final user = await SupabaseService().getUserByMobile(_regMobile);
+      if (!mounted) return;
+      _registrationBlocked.value = user?['role'] == UserModel.roleDoctor;
+    } catch (_) {
+      // Fail open: leave the button enabled.
+    }
   }
 
   /// Read route arguments to detect registration mode.
@@ -700,6 +726,7 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
           bodyColor: bodyColor,
           isSelected: isSelected,
           isRegistrationMode: _registrationMode,
+          registrationBlocked: _registrationBlocked.value,
           onSelect: () => selectedDoctor.value = place,
           onConnect: () => _onConnect(place),
         );
@@ -1080,6 +1107,58 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
                 .fadeIn(duration: 300.ms, delay: 200.ms)
                 .slideY(begin: -0.05, end: 0),
 
+            // ── Already-registered notice (registration mode) ──
+            // Shown while the entered mobile already belongs to a
+            // registered doctor — explains why every "Select & Continue"
+            // button below is disabled.
+            Obx(() {
+              // Read the observable unconditionally so GetX registers the
+              // dependency even when the notice is hidden (normal mode /
+              // check still in flight) — otherwise GetX flags the Obx as
+              // "improper use" for building without any reactive value.
+              final registrationBlocked = _registrationBlocked.value;
+              if (!_registrationMode || !registrationBlocked) {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withAlpha(18),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: AppColors.warning.withAlpha(70),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.info_outline_rounded,
+                        color: AppColors.warning,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'This mobile number is already registered as a '
+                          'doctor. Please log in to manage your clinic '
+                          'instead.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.45,
+                            color: bodyColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+
             // ── Content (with smooth crossfade when filter/search changes) ──
             Expanded(
               child: Obx(() {
@@ -1408,6 +1487,11 @@ class _PlaceCard extends StatefulWidget {
   final Color bodyColor;
   final bool isSelected;
   final bool isRegistrationMode;
+
+  /// When true (registration mode + the mobile already registered as a
+  /// doctor), the "Select & Continue" button is disabled and a hint is
+  /// shown instead of the forward arrow.
+  final bool registrationBlocked;
   final VoidCallback onSelect;
   final VoidCallback? onConnect;
 
@@ -1419,6 +1503,7 @@ class _PlaceCard extends StatefulWidget {
     required this.bodyColor,
     this.isSelected = false,
     this.isRegistrationMode = false,
+    this.registrationBlocked = false,
     required this.onSelect,
     this.onConnect,
   });
@@ -1765,11 +1850,17 @@ class _PlaceCardState extends State<_PlaceCard>
                     const SizedBox(height: 12),
 
                     // ── Connect / Select & Continue button ──
+                    // Disabled (registration mode) when the mobile is
+                    // already registered as a doctor — the doctor already
+                    // manages a clinic and should log in instead.
                     SizedBox(
                       width: double.infinity,
                       height: 44,
                       child: ElevatedButton.icon(
-                        onPressed: widget.onConnect,
+                        onPressed: (widget.isRegistrationMode &&
+                                widget.registrationBlocked)
+                            ? null
+                            : widget.onConnect,
                         icon: Icon(
                           widget.isRegistrationMode
                               ? Icons.arrow_forward_rounded
@@ -1792,6 +1883,19 @@ class _PlaceCardState extends State<_PlaceCard>
                         ),
                       ),
                     ),
+                    if (widget.isRegistrationMode &&
+                        widget.registrationBlocked) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Already registered as a doctor',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppColors.warning,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

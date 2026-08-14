@@ -78,29 +78,19 @@ class AppointmentController extends GetxController {
   /// so the booking screen can disable slots that are already taken.
   final RxSet<String> bookedSlotKeys = <String>{}.obs;
 
-  /// Fetch all appointments for [doctorPlaceId] and record which
-  /// date|time combinations are already booked. Every appointment status
-  /// (Pending / Upcoming / Completed / …) disables its slot — the slot is
-  /// only freed again once the appointment is Cancelled. See
-  /// [AppointmentStatus.occupiesSlot].
+  /// Fetch which date|time combinations are already booked for
+  /// [doctorPlaceId] and record them so the booking screen can disable
+  /// taken slots. Uses the minimal `get_booked_slot_keys` RPC — the
+  /// booking flow must NOT read other patients' appointment rows, so it
+  /// never calls the owner-scoped appointments SELECT directly. Every
+  /// appointment status (Pending / Upcoming / Completed / …) disables its
+  /// slot — the slot is only freed again once the appointment is
+  /// Cancelled. See [AppointmentStatus.occupiesSlot].
   Future<void> loadBookedSlots(String doctorPlaceId) async {
     try {
-      final data = await _supabase.getDoctorAppointments(doctorPlaceId);
+      final keys = await _supabase.getBookedSlotKeys(doctorPlaceId);
       bookedSlotKeys.assignAll(
-        data
-            .where(
-              (a) =>
-                  AppointmentStatus.occupiesSlot(
-                    a['status']?.toString() ?? '',
-                  ),
-            )
-            .map((a) {
-              final date = a['appointment_date']?.toString() ?? '';
-              final time = a['appointment_time']?.toString() ?? '';
-              return '$date|$time';
-            })
-            .where((key) => !key.startsWith('|') && !key.endsWith('|'))
-            .toSet(),
+        keys.where((key) => !key.startsWith('|') && !key.endsWith('|')),
       );
     } catch (_) {
       // Network/connection errors — treat nothing as booked so the user
@@ -267,11 +257,9 @@ class AppointmentController extends GetxController {
   /// trigger the wait). Mirrored server-side by the booking-page Edge
   /// Function (supabase/functions/booking-page/index.ts) so the web/QR
   /// flow can't bypass it.
-  static const Duration bookingCooldown = Duration(hours: 12);
-
   /// Set when the DB-level gate (the `enforce_one_active_booking_rule`
-  /// trigger) rejects an insert with the one-active-booking / cooldown
-  /// markers — i.e. the patient booked on another device (or their earlier
+  /// trigger) rejects an insert with the one-active-booking-per-doctor
+  /// marker — i.e. the patient booked on another device (or their earlier
   /// booking landed) in the window between the screen's pre-book check and
   /// the actual insert (a UPI payment can take minutes). The booking
   /// screen surfaces this instead of the generic failure snackbar, then
@@ -279,59 +267,58 @@ class AppointmentController extends GetxController {
   /// reactive) — the booking screen is its only consumer.
   String? serverBookingBlockMessage;
 
-  /// Maps a booking-insert exception to the friendly "one doctor at a
-  /// time" gate message, or null when the error is NOT a gate rejection
-  /// (slot taken, network, RLS, …). Matches the marker prefixes raised by
-  /// the DB trigger `enforce_one_active_booking_rule` (same wording the
-  /// Edge Function maps them to).
+  /// Maps a booking-insert exception to the friendly per-doctor gate
+  /// message, or null when the error is NOT a gate rejection (slot taken,
+  /// network, RLS, …). Matches the marker prefix raised by the DB trigger
+  /// `enforce_one_active_booking_rule` (same wording the Edge Function
+  /// maps it to).
   static String? bookingBlockMessageFromError(Object error) {
     final message = error.toString();
     if (message.contains('appointments_one_active_booking')) {
-      return 'You already have an appointment booked. Please wait for '
-          'it to be completed or cancelled before booking another.';
-    }
-    if (message.contains('appointments_booking_cooldown')) {
-      return 'You can book your next appointment 12 hours after your '
-          'last booking. Please try again later.';
+      return 'You already have an active appointment with this doctor. '
+          'Please wait for it to be completed or cancelled before '
+          'booking again.';
     }
     return null;
   }
 
-  /// The message to show when the "one doctor at a time" gate blocks a
-  /// new booking, or null when booking is allowed.
+  /// The message to show when the "one active booking per doctor" gate
+  /// blocks a new booking, or null when booking is allowed.
   ///
   /// [appointments] must be the patient's CURRENT appointments — call
   /// [loadAppointments] first so the check reflects the latest bookings
   /// (the booking screen refreshes right before the check).
-  static String? bookingBlockMessage(List<AppointmentModel> appointments) {
-    final now = DateTime.now();
-    DateTime? lastBookingAt;
+  ///
+  /// [doctorPlaceId] is the doctor being booked. Only an active
+  /// (Pending/Upcoming) appointment with the SAME doctor blocks — the
+  /// patient may hold active bookings with other doctors simultaneously,
+  /// and may book the same doctor again immediately once the current
+  /// booking is Completed or Cancelled (no cooldown). When
+  /// [doctorPlaceId] is null (no specific doctor, e.g. the history
+  /// screen), a neutral notice is returned only while the patient holds
+  /// ANY active booking.
+  static String? bookingBlockMessage(
+    List<AppointmentModel> appointments, {
+    String? doctorPlaceId,
+  }) {
+    var hasActive = false;
     for (final a in appointments) {
-      // An active (Pending/Upcoming) booking always blocks — the patient
-      // can hold only ONE at a time.
-      if (a.status == AppointmentStatus.pending ||
-          a.status == AppointmentStatus.upcoming) {
-        return 'You already have an appointment booked. Please wait for '
-            'it to be completed or cancelled before booking another.';
-      }
-      final created = a.createdAt;
-      if (created != null &&
-          (lastBookingAt == null || created.isAfter(lastBookingAt))) {
-        lastBookingAt = created;
+      final isActive = a.status == AppointmentStatus.pending ||
+          a.status == AppointmentStatus.upcoming;
+      if (!isActive) continue;
+      hasActive = true;
+      if (doctorPlaceId != null && a.doctorPlaceId == doctorPlaceId) {
+        return 'You already have an active appointment with this doctor. '
+            'Please wait for it to be completed or cancelled before '
+            'booking again.';
       }
     }
-    // Completed / Cancelled bookings still trigger the 12h cooldown from
-    // when they were created.
-    if (lastBookingAt != null) {
-      final waited = now.difference(lastBookingAt);
-      if (waited < bookingCooldown) {
-        final remaining = bookingCooldown - waited;
-        final h = remaining.inHours;
-        final m = remaining.inMinutes.remainder(60);
-        final timeLeft = h > 0 ? (m > 0 ? '$h h $m m' : '$h h') : '$m m';
-        return 'You can book your next appointment 12 hours after your '
-            'last booking. Please try again in $timeLeft.';
-      }
+    // No specific doctor target (e.g. the history screen): surface the
+    // notice while any active booking exists, so the patient isn't
+    // surprised when their next attempt at the same doctor is blocked.
+    if (doctorPlaceId == null && hasActive) {
+      return 'You have an active appointment. Complete or cancel it '
+          'before booking with the same doctor again.';
     }
     return null;
   }
@@ -480,6 +467,7 @@ class AppointmentController extends GetxController {
       final ok = initiatedByDoctor
           ? await _supabase.rescheduleAppointmentAsDoctor(
               appointment.appointmentId,
+              userId: userId,
               date: date,
               time: time,
               consultationType: consultationType,
@@ -529,8 +517,14 @@ class AppointmentController extends GetxController {
   }
 
   Future<void> cancelAppointment(String appointmentId) async {
+    final userId = _authController.currentUser.value?.id;
+    if (userId == null) return;
     try {
-      await _supabase.updateAppointmentStatus(appointmentId, 'Cancelled');
+      await _supabase.updateAppointmentStatus(
+        appointmentId,
+        'Cancelled',
+        userId: userId,
+      );
       // Let the doctor know the patient cancelled (fire-and-forget).
       unawaited(
         NotificationService.instance.notifyAppointmentCancelled(
@@ -543,8 +537,14 @@ class AppointmentController extends GetxController {
   }
 
   Future<void> completeAppointment(String appointmentId) async {
+    final userId = _authController.currentUser.value?.id;
+    if (userId == null) return;
     try {
-      await _supabase.updateAppointmentStatus(appointmentId, 'Completed');
+      await _supabase.updateAppointmentStatus(
+        appointmentId,
+        'Completed',
+        userId: userId,
+      );
       await loadAppointments();
     } catch (_) {}
   }

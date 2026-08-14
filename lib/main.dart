@@ -77,13 +77,13 @@ void main() async {
   // runApp so the first Scaffold is registered before the initial check.
   ConnectivityService.instance.start();
 
-  // App-wide system UI style: a solid BLACK status bar with white icons
+  // App-wide system UI style: a WHITE status bar with BLACK icons/text
   // (Android), light navigation bar, and dark status-bar text on iOS
   // (where the bar itself is transparent over the app's light surfaces).
   // Every screen inherits this default; screens can override locally.
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.black,
-    statusBarIconBrightness: Brightness.light,
+    statusBarColor: Colors.white,
+    statusBarIconBrightness: Brightness.dark,
     statusBarBrightness: Brightness.light,
     systemNavigationBarColor: AppColors.bgMain,
     systemNavigationBarIconBrightness: Brightness.dark,

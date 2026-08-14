@@ -9,6 +9,13 @@ class AppointmentModel {
   final String? appointmentDate;
   final String? appointmentTime;
   final Map<String, dynamic>? doctorDetails;
+
+  /// The doctor's Google Place ID for this appointment: the top-level
+  /// `doctor_place_id` column when present, falling back to the
+  /// `doctor_details` JSONB snapshot for legacy rows written before the
+  /// column existed. Used by the per-doctor booking gate to decide
+  /// whether this appointment blocks a new booking for a given doctor.
+  final String? doctorPlaceId;
   final String? callNumber;
 
   /// The patient's own mobile number, stored on the appointment at booking
@@ -78,6 +85,7 @@ class AppointmentModel {
     this.appointmentDate,
     this.appointmentTime,
     this.doctorDetails,
+    this.doctorPlaceId,
     this.callNumber,
     this.patientPhone,
     this.mapLocation,
@@ -101,6 +109,12 @@ class AppointmentModel {
         if (v is String) doctorDetails[key] = TextSanitizer.sanitize(v);
       }
     }
+    // Prefer the top-level column; legacy rows fall back to the JSONB
+    // snapshot (both could be empty strings for very old data).
+    final rawDoctorPlaceId = json['doctor_place_id']?.toString() ?? '';
+    final doctorPlaceId = rawDoctorPlaceId.isNotEmpty
+        ? rawDoctorPlaceId
+        : (doctorDetails?['place_id']?.toString() ?? '');
     return AppointmentModel(
       appointmentId: json['appointment_id']?.toString() ?? '',
       userId: json['user_id']?.toString(),
@@ -112,6 +126,7 @@ class AppointmentModel {
         json['appointment_time']?.toString(),
       ),
       doctorDetails: doctorDetails,
+      doctorPlaceId: doctorPlaceId,
       callNumber: TextSanitizer.sanitize(json['call_number']?.toString()),
       patientPhone: TextSanitizer.sanitize(json['patient_phone']?.toString()),
       mapLocation: json['map_location'] is Map

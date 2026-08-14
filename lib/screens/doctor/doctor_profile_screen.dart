@@ -1413,9 +1413,12 @@ class _AvailabilityCardState extends State<_AvailabilityCard> {
     if (doctor == null) return;
     setState(() => _saving = true);
     try {
+      final userId = Get.find<AuthController>().currentUser.value?.id;
+      if (userId == null) return;
       await SupabaseService().saveDoctorUnavailableRanges(
         doctor.placeId,
         ranges,
+        userId: userId,
       );
       if (mounted) {
         controller.currentDoctor.value = doctor.copyWith(

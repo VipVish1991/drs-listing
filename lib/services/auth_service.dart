@@ -20,6 +20,16 @@ class AuthService {
   factory AuthService() => _instance;
   AuthService._internal();
 
+  /// Mint a fresh OTP for [mobile] from the server (see
+  /// [SupabaseService.requestOtp]). DEMO MODE: returns the code so the
+  /// UI can display it. Returns null on failure.
+  Future<String?> requestOtp(String mobile) => _supabase.requestOtp(mobile);
+
+  /// Verify [otp] for [mobile] against the server (see
+  /// [SupabaseService.verifyOtp]). Returns true only on server acceptance.
+  Future<bool> verifyOtp(String mobile, String otp) =>
+      _supabase.verifyOtp(mobile, otp);
+
   /// Creates an unshared instance for subclassing in tests.
   ///
   /// The default [AuthService] factory always returns the singleton, so a

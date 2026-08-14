@@ -89,8 +89,9 @@ class DoctorModel {
   // ── Doctor-set payments ─────────────────────────────────────────────
   /// The clinic's UPI VPA that receives online consultation fees (e.g.
   /// `clinic@okhdfcbank`), set from the doctor profile's UPI ID card and
-  /// stored in the doctors table's `upi_id` column. When null the app-wide
-  /// default [AppConstants.upiReceiverVpa] is used in the booking flow.
+  /// stored in the doctors table's `upi_id` column. Online Pay (UPI) is
+  /// only offered when this is set — when null the patient pays at the
+  /// clinic (there is no app-wide fallback VPA).
   final String? upiId;
 
   // ══════════════════════════════════════════════════════════════════

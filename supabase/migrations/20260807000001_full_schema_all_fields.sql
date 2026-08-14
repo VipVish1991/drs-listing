@@ -352,27 +352,43 @@ CREATE INDEX IF NOT EXISTS idx_appointments_slot_occupancy
 
 ALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;
 
--- Allow anonymous users to read appointments (scoped by user_id in the query)
-CREATE POLICY "anon_can_select_appointments"
-    ON public.appointments
+-- Owner-scoped policies (matching the hardening migration
+-- 20260814000002_harden_ownership_rls.sql). The patient who booked OR the
+-- owning clinic (a doctors row whose user_id = the caller's x-user-id and
+-- whose place_id = the appointment's doctor_place_id) may read/insert/
+-- update. The booking screen's "which slots are taken" peek goes through
+-- the minimal get_booked_slot_keys() SECURITY DEFINER RPC instead.
+CREATE OR REPLACE FUNCTION public.is_appointment_owner(p_apt public.appointments)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+    SELECT (
+        (current_setting('request.headers', true)::jsonb ->> 'x-user-id') = p_apt.user_id::text
+        OR EXISTS (
+            SELECT 1 FROM public.doctors d
+            WHERE d.user_id = (current_setting('request.headers', true)::jsonb ->> 'x-user-id')
+              AND d.place_id = p_apt.doctor_place_id
+        )
+    );
+$$;
+
+CREATE POLICY "appointments_select_owner" ON public.appointments
     FOR SELECT
-    TO anon
-    USING (true);
+    TO anon, authenticated
+    USING (public.is_appointment_owner(appointments));
 
--- Allow anonymous users to create appointments
-CREATE POLICY "anon_can_insert_appointments"
-    ON public.appointments
+CREATE POLICY "appointments_insert_owner" ON public.appointments
     FOR INSERT
-    TO anon
-    WITH CHECK (true);
+    TO anon, authenticated
+    WITH CHECK (public.is_appointment_owner(appointments));
 
--- Allow anonymous users to update appointment status (cancel/complete)
-CREATE POLICY "anon_can_update_appointments"
-    ON public.appointments
+CREATE POLICY "appointments_update_owner" ON public.appointments
     FOR UPDATE
-    TO anon
-    USING (true)
-    WITH CHECK (true);
+    TO anon, authenticated
+    USING (public.is_appointment_owner(appointments))
+    WITH CHECK (public.is_appointment_owner(appointments));
 
 -- No DELETE policy needed (app never deletes appointments)
 
@@ -498,6 +514,131 @@ GRANT UPDATE (payment_status, paid_at, updated_at)
 
 
 -- ============================================================================
+-- 9. OTP REQUESTS TABLE (server-verified OTP, replaces hardcoded 1111)
+-- ============================================================================
+-- Mirrors 20260814000001_server_verified_otp.sql. request_otp() mints a
+-- 6-digit code (hash-only storage, 10-min expiry, 30s cooldown) and
+-- returns it for DEMO display (no SMS provider); verify_otp() checks
+-- hash, expiry, 5-attempt limit, single-use. Production: replace the
+-- `RETURN v_otp;` with an SMS send.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS public.otp_requests (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mobile      TEXT NOT NULL,
+    otp_hash    TEXT NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    attempts    INT NOT NULL DEFAULT 0,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_otp_requests_mobile
+    ON public.otp_requests (mobile, created_at DESC);
+
+CREATE OR REPLACE FUNCTION public.request_otp(p_mobile TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_mobile  TEXT;
+    v_otp     TEXT;
+    v_recent  TIMESTAMPTZ;
+BEGIN
+    v_mobile := btrim(p_mobile);
+    IF v_mobile = '' OR v_mobile ~ '[^0-9]' OR length(v_mobile) < 10 THEN
+        RAISE EXCEPTION 'Invalid mobile number' USING ERRCODE = 'P0001';
+    END IF;
+    SELECT MAX(created_at) INTO v_recent
+      FROM public.otp_requests
+     WHERE mobile = v_mobile;
+    IF v_recent IS NOT NULL AND (NOW() - v_recent) < interval '30 seconds' THEN
+        RAISE EXCEPTION 'Please wait before requesting another code'
+            USING ERRCODE = 'P0001';
+    END IF;
+    v_otp := lpad(floor(random() * 1000000)::int::text, 6, '0');
+    INSERT INTO public.otp_requests (mobile, otp_hash, expires_at)
+    VALUES (
+        v_mobile,
+        encode(digest(v_otp, 'sha256'), 'hex'),
+        NOW() + interval '10 minutes'
+    );
+    RETURN v_otp; -- DEMO MODE: app displays it. Production: SMS instead.
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.verify_otp(p_mobile TEXT, p_otp TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_mobile  TEXT;
+    v_otp     TEXT;
+    v_row     public.otp_requests%ROWTYPE;
+    v_hash    TEXT;
+BEGIN
+    v_mobile := btrim(p_mobile);
+    v_otp    := btrim(p_otp);
+    IF v_mobile = '' OR v_otp = '' THEN
+        RETURN FALSE;
+    END IF;
+    SELECT * INTO v_row
+      FROM public.otp_requests
+     WHERE mobile = v_mobile
+       AND used_at IS NULL
+     ORDER BY created_at DESC
+     LIMIT 1;
+    IF v_row.id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    IF NOW() > v_row.expires_at THEN
+        RETURN FALSE;
+    END IF;
+    IF v_row.attempts >= 5 THEN
+        RETURN FALSE;
+    END IF;
+    v_hash := encode(digest(v_otp, 'sha256'), 'hex');
+    IF v_hash <> v_row.otp_hash THEN
+        UPDATE public.otp_requests
+           SET attempts = attempts + 1
+         WHERE id = v_row.id;
+        RETURN FALSE;
+    END IF;
+    UPDATE public.otp_requests
+       SET used_at = NOW()
+     WHERE id = v_row.id;
+    RETURN TRUE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.request_otp(TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.verify_otp(TEXT, TEXT) TO anon, authenticated;
+
+-- Booking screen's minimal "which slots are taken" peek (no patient data).
+-- Matches 20260814000002_harden_ownership_rls.sql.
+CREATE OR REPLACE FUNCTION public.get_booked_slot_keys(p_doctor_place_id TEXT)
+RETURNS TEXT[]
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT ARRAY(
+        SELECT appointment_date::text || '|' || appointment_time
+        FROM public.appointments
+        WHERE doctor_place_id = p_doctor_place_id
+          AND status IS DISTINCT FROM 'Cancelled'
+    );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_booked_slot_keys(TEXT) TO anon, authenticated;
+
+
+-- ============================================================================
 -- 3. SAVED DOCTORS TABLE
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS public.saved_doctors (
@@ -517,23 +658,27 @@ CREATE INDEX IF NOT EXISTS idx_saved_doctors_place_id
 
 ALTER TABLE public.saved_doctors ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "anon_can_select_saved_doctors"
-    ON public.saved_doctors
+-- Owner-scoped (user_id = x-user-id), matching 20260814000002.
+CREATE POLICY "saved_doctors_select_own" ON public.saved_doctors
     FOR SELECT
-    TO anon
-    USING (true);
+    TO anon, authenticated
+    USING (
+        (current_setting('request.headers', true)::jsonb ->> 'x-user-id') = user_id::text
+    );
 
-CREATE POLICY "anon_can_insert_saved_doctors"
-    ON public.saved_doctors
+CREATE POLICY "saved_doctors_insert_own" ON public.saved_doctors
     FOR INSERT
-    TO anon
-    WITH CHECK (true);
+    TO anon, authenticated
+    WITH CHECK (
+        (current_setting('request.headers', true)::jsonb ->> 'x-user-id') = user_id::text
+    );
 
-CREATE POLICY "anon_can_delete_saved_doctors"
-    ON public.saved_doctors
+CREATE POLICY "saved_doctors_delete_own" ON public.saved_doctors
     FOR DELETE
-    TO anon
-    USING (true);
+    TO anon, authenticated
+    USING (
+        (current_setting('request.headers', true)::jsonb ->> 'x-user-id') = user_id::text
+    );
 
 
 -- ============================================================================
@@ -604,24 +749,35 @@ CREATE INDEX IF NOT EXISTS idx_doctors_primary_type ON public.doctors (primary_t
 
 ALTER TABLE public.doctors ENABLE ROW LEVEL SECURITY;
 
+-- SELECT stays OPEN (doctor/clinic discovery). Writes are owner-scoped:
+-- only the user who CONNECTED to the clinic (doctors.user_id =
+-- x-user-id; legacy NULL rows are adoptable by the first connector) may
+-- create/update it — protects the UPI payment ID from hijack. Matches
+-- 20260814000002_harden_ownership_rls.sql.
 CREATE POLICY "anon_can_select_doctors"
     ON public.doctors
     FOR SELECT
     TO anon
     USING (true);
 
-CREATE POLICY "anon_can_insert_doctors"
-    ON public.doctors
+CREATE POLICY "doctors_insert_owner" ON public.doctors
     FOR INSERT
-    TO anon
-    WITH CHECK (true);
+    TO anon, authenticated
+    WITH CHECK (
+        (current_setting('request.headers', true)::jsonb ->> 'x-user-id') = user_id::text
+    );
 
-CREATE POLICY "anon_can_update_doctors"
-    ON public.doctors
+CREATE POLICY "doctors_update_owner" ON public.doctors
     FOR UPDATE
-    TO anon
-    USING (true)
-    WITH CHECK (true);
+    TO anon, authenticated
+    USING (
+        user_id IS NULL
+        OR (current_setting('request.headers', true)::jsonb ->> 'x-user-id') = user_id::text
+    )
+    WITH CHECK (
+        user_id IS NULL
+        OR (current_setting('request.headers', true)::jsonb ->> 'x-user-id') = user_id::text
+    );
 
 
 -- ============================================================================
@@ -663,30 +819,47 @@ CREATE INDEX IF NOT EXISTS idx_doctor_slots_user_id ON public.doctor_slots (user
 
 ALTER TABLE public.doctor_slots ENABLE ROW LEVEL SECURITY;
 
+-- SELECT stays OPEN (patients need to see availability). Writes are
+-- owner-scoped to the owning clinic (doctors.user_id = x-user-id, place
+-- match; legacy NULL user_id clinics adoptable) — matches
+-- 20260814000002_harden_ownership_rls.sql.
 CREATE POLICY "anon_can_select_doctor_slots"
     ON public.doctor_slots
     FOR SELECT
     TO anon
     USING (true);
 
-CREATE POLICY "anon_can_insert_doctor_slots"
-    ON public.doctor_slots
+CREATE OR REPLACE FUNCTION public.is_slot_owner(p_slot public.doctor_slots)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.doctors d
+        WHERE d.place_id = p_slot.doctor_place_id
+          AND (
+              d.user_id IS NULL
+              OR d.user_id = (current_setting('request.headers', true)::jsonb ->> 'x-user-id')
+          )
+    );
+$$;
+
+CREATE POLICY "doctor_slots_insert_owner" ON public.doctor_slots
     FOR INSERT
-    TO anon
-    WITH CHECK (true);
+    TO anon, authenticated
+    WITH CHECK (public.is_slot_owner(doctor_slots));
 
-CREATE POLICY "anon_can_update_doctor_slots"
-    ON public.doctor_slots
+CREATE POLICY "doctor_slots_update_owner" ON public.doctor_slots
     FOR UPDATE
-    TO anon
-    USING (true)
-    WITH CHECK (true);
+    TO anon, authenticated
+    USING (public.is_slot_owner(doctor_slots))
+    WITH CHECK (public.is_slot_owner(doctor_slots));
 
-CREATE POLICY "anon_can_delete_doctor_slots"
-    ON public.doctor_slots
+CREATE POLICY "doctor_slots_delete_owner" ON public.doctor_slots
     FOR DELETE
-    TO anon
-    USING (true);
+    TO anon, authenticated
+    USING (public.is_slot_owner(doctor_slots));
 
 
 -- ============================================================================

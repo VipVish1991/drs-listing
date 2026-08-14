@@ -62,18 +62,18 @@ class AppTheme {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        // App-wide system UI style: a solid BLACK status bar with WHITE
-        // icons so the clock/battery stay visible (Android), plus a light
-        // system navigation bar. `statusBarBrightness` is the iOS-only
-        // counterpart — kept light there so the (transparent, uncolorable)
-        // iOS status bar keeps dark text over the app's light surfaces.
-        // This matches what StatusBarService + main.dart apply via the
-        // flutter_statusbarcolor_ns plugin. MaterialApp uses this as the
-        // default for every route; screens with dark surfaces (e.g. the
-        // splash screen) override locally with the same black bar.
+        // App-wide system UI style: a WHITE status bar with BLACK
+        // icons/text so the clock/battery stay visible (Android), plus a
+        // light system navigation bar. `statusBarBrightness` is the
+        // iOS-only counterpart — kept light there so the (transparent,
+        // uncolorable) iOS status bar keeps dark text over the app's
+        // light surfaces. This matches what StatusBarService + main.dart
+        // apply via the flutter_statusbarcolor_ns plugin. MaterialApp uses
+        // this as the default for every route; screens with dark surfaces
+        // (e.g. the splash screen) override locally.
         systemOverlayStyle: SystemUiOverlayStyle(
-          statusBarColor: Colors.black,
-          statusBarIconBrightness: Brightness.light,
+          statusBarColor: Colors.white,
+          statusBarIconBrightness: Brightness.dark,
           statusBarBrightness: Brightness.light,
           systemNavigationBarColor: AppColors.bgMain,
           systemNavigationBarIconBrightness: Brightness.dark,

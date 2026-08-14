@@ -26,10 +26,20 @@ class _TestAuthController extends AuthController {
 
 /// Counts `register()` invocations so the smoke test can assert the OTP
 /// verification leads to exactly one registration.
+///
+/// Mimics the SERVER-verified OTP contract: [requestOtp] issues a demo
+/// code and [verifyOtp] accepts only the code that was issued.
 class _FakeAuthService extends AuthService {
   _FakeAuthService() : super.testing();
 
   int registerCalls = 0;
+  final String serverOtp = '654321';
+
+  @override
+  Future<String?> requestOtp(String mobile) async => serverOtp;
+
+  @override
+  Future<bool> verifyOtp(String mobile, String otp) async => otp == serverOtp;
 
   @override
   Future<UserModel> register(
@@ -94,18 +104,18 @@ void main() {
   }
 
   testWidgets(
-      'ON-DEVICE: default OTP 1111 is pre-filled and verifies to patient '
+      'ON-DEVICE: server-minted OTP is pre-filled and verifies to patient '
       'home', (tester) async {
     final fake = _FakeAuthService();
     await pumpOtp(tester, fake: fake);
 
-    // Default OTP '1111' pre-filled → pin boxes render '1', and the pill
-    // tells the user the default code.
-    expect(find.text('1'), findsAtLeastNWidgets(4));
-    expect(find.text('Use default OTP: 1111'), findsOneWidget);
+    // Server-minted OTP '654321' pre-filled → the pill shows it (demo
+    // mode), and the Verify button is present.
+    expect(find.text('Demo OTP: 654321'), findsOneWidget);
     expect(find.text('Verify & Continue'), findsOneWidget);
 
-    // Tap Verify → registers exactly once and lands on the patient home.
+    // Tap Verify → the server accepts the code, registers exactly once
+    // and lands on the patient home.
     await tester.tap(find.text('Verify & Continue'));
     await tester.pumpAndSettle();
 
@@ -120,10 +130,11 @@ void main() {
 
   testWidgets(
       'ON-DEVICE: a wrong OTP is rejected without registering', (tester) async {
-    await pumpOtp(tester);
+    final fake = _FakeAuthService();
+    await pumpOtp(tester, fake: fake);
 
-    // Replace the pre-filled 1111 with 2222 → wrong code.
-    await tester.enterText(find.byType(PinCodeTextField), '2222');
+    // Replace the pre-filled 654321 with a wrong 6-digit code.
+    await tester.enterText(find.byType(PinCodeTextField), '222222');
     await tester.pump();
     await tester.tap(find.text('Verify & Continue'));
     await tester.pump();
@@ -131,9 +142,6 @@ void main() {
     expect(find.text('Invalid OTP. Please try again.'), findsOneWidget);
 
     // register() is never reached for a wrong code.
-    final fake = tester
-        .widget<OtpVerificationScreen>(find.byType(OtpVerificationScreen))
-        .authService as _FakeAuthService;
     expect(fake.registerCalls, 0);
 
     await flushResendTimer(tester);

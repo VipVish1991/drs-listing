@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../config/theme.dart';
 
-/// Amber notice explaining the "one patient, one doctor at a time" rule —
-/// shown while the patient can't book right now (an active Pending/Upcoming
-/// booking, or within the 12h cooldown from their most recent booking).
+/// Amber notice explaining the "one active booking per doctor" rule —
+/// shown while the patient holds an active Pending/Upcoming booking with
+/// the doctor being booked (or, on the history screen without a doctor
+/// context, while they hold any active booking).
 ///
 /// Shared by the booking screen (where it appears above the form while the
 /// Book action is blocked) and the appointment history screen (where it
-/// explains the block the patient would hit if they tried to book).
+/// explains the block the patient would hit if they tried to book the
+/// same doctor again).
 class BookingBlockBanner extends StatelessWidget {
   /// The gate message — the output of
   /// `AppointmentController.bookingBlockMessage`.
@@ -20,9 +22,9 @@ class BookingBlockBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     // Keyed by the message so the entrance animation REPLAYS whenever the
     // wording changes in place (e.g. an active booking being completed
-    // flips the notice to the 12h-cooldown text) — the notice always
-    // animates in for the patient, matching the app's animated-notice
-    // language on the history screen.
+    // removes the notice) — the notice always animates in for the
+    // patient, matching the app's animated-notice language on the history
+    // screen.
     return KeyedSubtree(
       key: ValueKey(message),
       child: Container(
@@ -55,10 +57,10 @@ class BookingBlockBanner extends StatelessWidget {
           ],
         ),
       )
-          // The "You already have an appointment…" / 12h-cooldown gate
-          // notice drops in with the same fade + slide family as the rest
-          // of the screen — a soft slide-down from above that reads as a
-          // notice arriving, never a jarring pop.
+          // The per-doctor gate notice drops in with the same fade +
+          // slide family as the rest of the screen — a soft slide-down
+          // from above that reads as a notice arriving, never a jarring
+          // pop.
           .animate()
           .fadeIn(duration: 400.ms, curve: Curves.easeOut)
           .slideY(begin: -0.25, end: 0, duration: 400.ms, curve: Curves.easeOut),

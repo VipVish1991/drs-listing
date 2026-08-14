@@ -84,22 +84,19 @@ const BOOKING_SECRET = Deno.env.get("BOOKING_SHARED_SECRET") ?? "";
 // function fire the doctor push after a web/QR booking lands.
 const NOTIFY_SECRET = Deno.env.get("NOTIFY_SHARED_SECRET") ?? "";
 
-// "One patient, one doctor at a time" gate: a patient may hold at most one
-// active (Pending/Upcoming) booking, and the next booking is only allowed
-// once this much time has passed since their most recent booking was
-// CREATED (Completed/Cancelled bookings still trigger the wait). Mirrors
-// AppointmentController.bookingCooldown in the Flutter app.
-const BOOKING_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+// "One active booking per doctor" gate: a patient may hold at most one
+// active (Pending/Upcoming) booking with a GIVEN doctor at a time. Other
+// doctors are never affected — the patient can book a different doctor
+// while an appointment with doctor A is still active, and can re-book
+// doctor A immediately once that booking is Completed or Cancelled (no
+// cooldown). Mirrors AppointmentController.bookingBlockMessage in the app.
 
-// Shared gate messages — the SAME wording the Flutter app shows. Used both
+// Shared gate message — the SAME wording the Flutter app shows. Used both
 // by the pre-insert bookingGateError() check and when the DB-level
 // enforce_one_active_booking_rule trigger catches a race after it.
 const GATE_ACTIVE_MSG =
-  "You already have an appointment booked. Please wait for it to be " +
-  "completed or cancelled before booking another.";
-const GATE_COOLDOWN_MSG =
-  "You can book your next appointment 12 hours after your last " +
-  "booking. Please try again later.";
+  "You already have an active appointment with this doctor. Please " +
+  "wait for it to be completed or cancelled before booking again.";
 
 serve(async (req) => {
   // ── CORS preflight ─────────────────────────────────────────────
@@ -355,23 +352,26 @@ async function historyPayload(mobileRaw: string) {
   };
 }
 
-// ── One-doctor-at-a-time gate ───────────────────────────────────────
+// ── One-active-booking-per-doctor gate ─────────────────────────────
 
-/// The "one patient, one doctor at a time" rule: returns an error message
-/// when the patient can't book right now — they hold an active
-/// (Pending/Upcoming) booking, or less than [BOOKING_COOLDOWN_MS] has
-/// passed since their most recent booking was created — or null when
-/// booking is allowed. Query failures FAIL OPEN (a gate glitch must never
-/// block a legitimate booking; the slot-occupancy trigger still guards
-/// slots). Mirrors AppointmentController.bookingBlockMessage in the app.
+/// The "one active booking per doctor" rule: returns an error message
+/// when the patient already holds an active (Pending/Upcoming) booking
+/// with [doctorPlaceId] — other doctors stay bookable, and the same
+/// doctor can be re-booked immediately once the active booking is
+/// Completed or Cancelled — or null when booking is allowed. Query
+/// failures FAIL OPEN (a gate glitch must never block a legitimate
+/// booking; the slot-occupancy trigger still guards slots). Mirrors
+/// AppointmentController.bookingBlockMessage in the app.
 async function bookingGateError(
   supabase: ReturnType<typeof createClient>,
   userId: string,
+  doctorPlaceId: string,
 ): Promise<string | null> {
   const active = await supabase
     .from("appointments")
     .select("appointment_id")
     .eq("user_id", userId)
+    .eq("doctor_place_id", doctorPlaceId)
     .in("status", ["Pending", "Upcoming"])
     .limit(1);
   if (active.error) {
@@ -380,25 +380,6 @@ async function bookingGateError(
   }
   if (active.data && active.data.length > 0) {
     return GATE_ACTIVE_MSG;
-  }
-
-  const latest = await supabase
-    .from("appointments")
-    .select("created_at")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1);
-  if (latest.error) {
-    console.error("bookingGateError: cooldown check failed:", latest.error.message);
-    return null;
-  }
-  if (latest.data && latest.data.length > 0) {
-    const created = new Date(
-      latest.data[0].created_at as string,
-    ).getTime();
-    if (Number.isFinite(created) && Date.now() - created < BOOKING_COOLDOWN_MS) {
-      return GATE_COOLDOWN_MSG;
-    }
   }
   return null;
 }
@@ -501,10 +482,10 @@ async function createBooking(
     userId = created.data.id;
   }
 
-  // 1b. One patient, one doctor at a time: an active (Pending/Upcoming)
-  //     booking, or a booking made within the last 12 hours, blocks the
-  //     next one — with the same message the app shows.
-  const gateError = await bookingGateError(supabase, userId);
+  // 1b. One active booking per doctor: an active (Pending/Upcoming)
+  //     booking with THIS doctor blocks a second one — other doctors stay
+  //     bookable — with the same message the app shows.
+  const gateError = await bookingGateError(supabase, userId, doctorPlaceId);
   if (gateError) return { ok: false, error: gateError };
 
   // 2. Pull the doctor snapshot (for doctor_name + doctor_details).
@@ -615,9 +596,6 @@ async function createBooking(
     // the same friendly message instead of a raw database error.
     if (message.includes("appointments_one_active_booking")) {
       return { ok: false, error: GATE_ACTIVE_MSG };
-    }
-    if (message.includes("appointments_booking_cooldown")) {
-      return { ok: false, error: GATE_COOLDOWN_MSG };
     }
     return { ok: false, error: insertError.message };
   }

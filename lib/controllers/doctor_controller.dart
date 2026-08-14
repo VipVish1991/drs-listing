@@ -161,7 +161,12 @@ class DoctorController extends GetxController {
 
     isLoadingAppointments.value = true;
     try {
-      final data = await _supabase.getDoctorAppointments(doctor.placeId);
+      final userId = Get.find<AuthController>().currentUser.value?.id;
+      if (userId == null) return;
+      final data = await _supabase.getDoctorAppointments(
+        doctor.placeId,
+        userId: userId,
+      );
       appointments.value = data
           .map((json) => AppointmentModel.fromJson(json))
           .toList();
@@ -180,7 +185,12 @@ class DoctorController extends GetxController {
 
     isLoadingStats.value = true;
     try {
-      final stats = await _supabase.getDoctorAppointmentStats(doctor.placeId);
+      final userId = Get.find<AuthController>().currentUser.value?.id;
+      if (userId == null) return;
+      final stats = await _supabase.getDoctorAppointmentStats(
+        doctor.placeId,
+        userId: userId,
+      );
       totalAppointments.value = stats['total'] ?? 0;
       todayAppointments.value = stats['today'] ?? 0;
       completedAppointments.value = stats['completed'] ?? 0;
@@ -238,9 +248,15 @@ class DoctorController extends GetxController {
   Future<void> updateDoctorUpiId(String upiId) async {
     final doctor = currentDoctor.value;
     if (doctor == null) return;
+    final userId = Get.find<AuthController>().currentUser.value?.id;
+    if (userId == null) return;
     final trimmed = upiId.trim();
     final updated = doctor.copyWith(upiId: trimmed.isEmpty ? null : trimmed);
-    await _supabase.saveDoctorUpiId(doctor.placeId, updated.upiId);
+    await _supabase.saveDoctorUpiId(
+      doctor.placeId,
+      updated.upiId,
+      userId: userId,
+    );
     currentDoctor.value = updated;
   }
 
@@ -250,7 +266,13 @@ class DoctorController extends GetxController {
     String status,
   ) async {
     try {
-      await _supabase.updateAppointmentStatus(appointmentId, status);
+      final userId = Get.find<AuthController>().currentUser.value?.id;
+      if (userId == null) return;
+      await _supabase.updateAppointmentStatus(
+        appointmentId,
+        status,
+        userId: userId,
+      );
       // Push a notification to the patient about their changed status
       // (fire-and-forget — a delivery hiccup must never fail the update).
       final doctorMobile =
@@ -282,8 +304,18 @@ class DoctorController extends GetxController {
     List<String> urls,
   ) async {
     try {
-      await _supabase.addPrescriptionUrls(appointmentId, urls);
-      await _supabase.updateAppointmentStatus(appointmentId, 'Completed');
+      final userId = Get.find<AuthController>().currentUser.value?.id;
+      if (userId == null) return;
+      await _supabase.addPrescriptionUrls(
+        appointmentId,
+        urls,
+        userId: userId,
+      );
+      await _supabase.updateAppointmentStatus(
+        appointmentId,
+        'Completed',
+        userId: userId,
+      );
       // Notify the patient their consultation is complete (fire-and-forget).
       final doctorMobile =
           Get.find<AuthController>().currentUser.value?.mobile;
@@ -326,7 +358,12 @@ class DoctorController extends GetxController {
     if (doctor == null) return;
 
     try {
-      final data = await _supabase.getDoctorAppointments(doctor.placeId);
+      final userId = Get.find<AuthController>().currentUser.value?.id;
+      if (userId == null) return;
+      final data = await _supabase.getDoctorAppointments(
+        doctor.placeId,
+        userId: userId,
+      );
       final currentCount = data.length;
       if (currentCount > _lastKnownAppointmentCount) {
         final newCount = currentCount - _lastKnownAppointmentCount;

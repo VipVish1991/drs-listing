@@ -377,7 +377,10 @@ class DoctorAvailabilityController extends GetxController {
 
       // ── Step 2: Delete old slots ─────────────────────────────────
       debugPrint('ℹ️ [saveAll] Deleting old slots...');
-      await _supabase.deleteAllDoctorSlots(doctor.placeId);
+      await _supabase.deleteAllDoctorSlots(
+        doctor.placeId,
+        userId: userId,
+      );
       debugPrint('✅ [saveAll] Old slots deleted');
 
       // ── Step 3: Build new slots ──────────────────────────────────

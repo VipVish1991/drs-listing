@@ -2,6 +2,53 @@
 
 AI-powered healthcare assistant & doctor discovery app.
 
+## Security Model
+
+**Server-verified OTP (no universal backdoor).** Registration / doctor
+connection verify a code minted by the `request_otp` RPC and checked by
+`verify_otp` — there is no hardcoded `1111` anymore. Each code is unique,
+expires after 10 minutes, allows 5 attempts, is single-use, and has a 30s
+per-mobile cooldown. Codes are stored **hash-only** (SHA-256) — the
+plaintext is never persisted. DEMO MODE: `request_otp` returns the code so
+the app can display it (no SMS provider is wired up). To go production-
+grade, replace the `RETURN v_otp;` in the RPC with an SMS/WhatsApp send.
+Migration: `supabase/migrations/20260814000001_server_verified_otp.sql`.
+
+**Owner-scoped RLS (no mass access with the anon key).** Every table the
+app writes follows the same convention — the caller's UUID travels in the
+`x-user-id` request header, and RLS policies match rows against it:
+
+| Table | Who can write |
+|---|---|
+| `users` | the row whose mobile/id the headers name |
+| `appointments` | the booking patient OR the owning clinic (`doctors.user_id`) |
+| `doctors` | the user who connected to the clinic (legacy NULL rows adoptable) |
+| `doctor_slots` | the owning clinic |
+| `saved_doctors` | the row's own user |
+| `payments` | the patient (read/insert) + owning clinic (status only) |
+| `notifications` | the row's own user |
+
+`doctors` and `doctor_slots` SELECT stay open (public discovery + booking
+availability); the patient booking screen's "which slots are taken" peek
+uses the minimal `get_booked_slot_keys` RPC (no patient data).
+Migration: `supabase/migrations/20260814000002_harden_ownership_rls.sql`.
+
+**Edge Functions** are gated by shared secrets (constant-time compared):
+`BOOKING_SHARED_SECRET` (QR booking page), `NOTIFY_SHARED_SECRET` (push
+notifications, plus per-appointment caller verification) and
+`PLACES_SHARED_SECRET` (Google Places proxy — stops random traffic burning
+the API quota). Secrets are extractable from the app (documented tradeoff,
+same as the booking QR URLs) — they gate casual/automated abuse, not a
+hard auth boundary.
+
+**Known residual risk (accepted):** the anon key is public and the
+`x-user-id` header is client-settable, so a client that knows a victim's
+UUID could still impersonate them. The hardening removes the
+no-knowledge attacks (mass enumeration, cross-row writes, UPI payment
+hijack) and the universal OTP backdoor; it does not replace real
+Supabase Auth + phone-OTP delivery, which is the documented production
+path.
+
 ## Development Tooling
 
 The Supabase scripts talk to the live project's Management API and read
@@ -205,10 +252,11 @@ of `PluginRegistry.Registrar` (removed in Flutter 3.35+) that breaks the
 Android build, and its module predates AGP 8's `namespace` requirement.
 The vendored copy patches both; no other code changes.
 
-Doctors that haven't set their own VPA fall back to the app-wide merchant
-VPA in `AppConstants.upiReceiverVpa` / `upiReceiverName`
-(`lib/config/constants.dart`) — replace the placeholder with the real
-merchant VPA before going live.
+Online Pay (UPI) is only offered when the booked doctor has set their
+own VPA (`doctors.upi_id`, edited from the doctor profile's UPI Payment
+ID card) — there is deliberately **no app-wide fallback VPA**: a
+placeholder address cannot receive money, so when a doctor has no UPI ID
+the patient pays at the clinic instead.
 
 > **Note:** intent-based UPI has no server-side verification, so only a
 > `success` status is trusted as paid. A `submitted` (unconfirmed)
@@ -217,36 +265,38 @@ merchant VPA before going live.
 > payment verification, swap `UpiPaymentService` for a gateway SDK
 > (Razorpay/PhonePe) that returns a server-verifiable transaction id.
 
-## One Patient, One Doctor at a Time
+## One Active Booking Per Doctor
 
 A patient can hold **at most one active appointment** (Pending/Upcoming)
-at a time, and the next booking is only allowed once **12 hours** have
-passed since their most recent booking was **created** — a Completed or
-Cancelled appointment still starts the clock (the rule keys off the
-booking moment, not the visit). Blocked bookings explain why: the booking
-screen shows an amber notice ("You already have an appointment booked…"
-or "…12 hours after your last booking…" with the remaining time), the
-same message appears again as a snackbar if the patient taps **Book**, and
-the web/QR page surfaces the identical wording from the server.
+with a **given doctor** at a time. Other doctors are never affected — the
+patient can book a different doctor while an appointment with doctor A is
+still active, and can re-book doctor A **immediately** once that booking
+is Completed or Cancelled (no cooldown). Blocked bookings explain why:
+the booking screen shows an amber notice ("You already have an active
+appointment with this doctor…"), the same message appears again as a
+snackbar if the patient taps **Book**, and the web/QR page surfaces the
+identical wording from the server.
 
 The rule is enforced in **three layers** (same pattern as the slot rule):
 
 1. **Booking screen** — refreshes the patient's appointments on open and
-   re-checks right before booking (`AppointmentController`
-   `bookingBlockMessage`, `lib/controllers/appointment_controller.dart`),
-   showing the banner + blocking the Book action.
+   re-checks right before booking, scoped to the doctor being booked
+   (`AppointmentController.bookingBlockMessage`,
+   `lib/controllers/appointment_controller.dart`), showing the banner +
+   blocking the Book action only when that doctor already has an active
+   booking.
 2. **Web/QR booking** — the `booking-page` Edge Function runs the same
    gate server-side (`bookingGateError`,
    `supabase/functions/booking-page/index.ts`) so a scan can't bypass it.
 3. **Database** — the `enforce_one_active_booking_rule` trigger
-   (`supabase/migrations/20260812000001_enforce_one_active_booking_rule.sql`,
+   (`supabase/migrations/20260813000001_enforce_one_active_booking_per_doctor.sql`,
    applied by `deploy_booking.py`) is the final authority: it rejects any
-   INSERT that would give a patient a second active booking or a second
-   booking within the 12h window — so even two devices booking in
-   parallel (e.g. while a UPI payment is in flight) can't slip through.
-   Reschedules (UPDATEs) and Cancel/Complete status changes are never
-   blocked. The app and Edge Function both translate the trigger's error
-   markers back into the friendly gate message.
+   INSERT that would give a patient a second active booking with the SAME
+   doctor — so even two devices booking in parallel (e.g. while a UPI
+   payment is in flight) can't slip through. Reschedules (UPDATEs) and
+   Cancel/Complete status changes are never blocked. The app and Edge
+   Function both translate the trigger's error marker back into the
+   friendly gate message.
 
 ## Reschedule Appointments
 

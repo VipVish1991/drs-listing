@@ -267,11 +267,12 @@ void main() {
     expect(find.text('Offline Pay'), findsOneWidget);
   });
 
-  testWidgets('payment sheet hides the payee pill when the doctor has no '
-      'UPI in the DB', (tester) async {
-    // The doctors row has no upi_id → the merge leaves upiId null and the
-    // modal must NOT show a "Pay to:" pill (the booking flow then falls
-    // back to the app-wide default VPA at pay time).
+  testWidgets('payment sheet hides online pay entirely when the doctor has '
+      'no UPI in the DB', (tester) async {
+    // The doctors row has no upi_id → the merge leaves upiId null. Without
+    // a real receiving VPA an online payment can never complete, so the
+    // modal must NOT offer Online Pay at all (no "Pay to:" pill, no UPI
+    // tile) — the patient pays at the clinic instead.
     dbUpiId = null;
 
     await pumpBookingFlow(tester);
@@ -280,7 +281,8 @@ void main() {
     expect(find.text('Consultation Payment'), findsOneWidget);
     expect(find.text('Video Consultation  •  ₹800'), findsOneWidget);
     expect(find.textContaining('Pay to:'), findsNothing);
-    expect(find.text('Online Pay (UPI)'), findsOneWidget);
+    expect(find.text('Online Pay (UPI)'), findsNothing);
+    expect(find.textContaining('Online payment not available'), findsOneWidget);
     expect(find.text('Offline Pay'), findsOneWidget);
   });
 

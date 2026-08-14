@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:upi_india/upi_india.dart';
 
-import '../config/constants.dart';
 
 /// Outcome of a UPI payment attempt, normalized from the raw [UpiResponse]
 /// so the booking flow only deals with the cases it actually cares about.
@@ -50,10 +49,14 @@ class UpiPaymentResult {
 /// Thin wrapper around [upi_india] for the app's booking flow.
 ///
 /// Fires an intent to an installed UPI app (GPay/PhonePe/Paytm/…) with the
-/// consultation fee and the clinic's VPA ([AppConstants.upiReceiverVpa]),
-/// then maps the raw platform response to a [UpiPaymentResult]. Kept
-/// deliberately small so the payment logic is easy to swap later (e.g. for
-/// a full payment-gateway SDK that returns a server-verifiable txnId).
+/// consultation fee and the doctor's own receiving VPA, then maps the raw
+/// platform response to a [UpiPaymentResult]. Kept deliberately small so
+/// the payment logic is easy to swap later (e.g. for a full payment-gateway
+/// SDK that returns a server-verifiable txnId).
+///
+/// There is deliberately NO app-wide fallback VPA: a placeholder address
+/// cannot receive money, so [pay] requires the real receiving VPA and
+/// returns a 'failed' outcome instead of firing an intent to a blank one.
 class UpiPaymentService {
   static final UpiPaymentService instance = UpiPaymentService._internal();
   UpiPaymentService._internal();
@@ -242,10 +245,12 @@ class UpiPaymentService {
   /// (the appointment id works well). [note] is the human-readable purpose
   /// shown in the UPI app (e.g. 'Consultation fee — Dr. X').
   ///
-  /// [receiverUpiAddress] / [receiverName] override the app-wide default
-  /// merchant VPA — the booking flow passes the booked doctor's own UPI ID
-  /// so every clinic collects on their own account. Null falls back to
-  /// [AppConstants.upiReceiverVpa] / [AppConstants.upiReceiverName].
+  /// [receiverUpiAddress] is the UPI VPA that receives the money — the
+  /// booked doctor's own UPI ID (doctors.upi_id). It is REQUIRED: there is
+  /// no app-wide fallback, and a blank address returns a 'failed' outcome
+  /// WITHOUT firing the intent (a placeholder VPA can never receive
+  /// money). [receiverName] is the payee name shown inside the UPI app;
+  /// when omitted the receiver address is used.
   ///
   /// Returns a normalized [UpiPaymentResult]; never throws — platform
   /// errors (no UPI apps, invalid amount, cancelled) map to a 'failed'
@@ -254,15 +259,20 @@ class UpiPaymentService {
     required UpiApp app,
     required double amount,
     required String transactionRef,
+    required String receiverUpiAddress,
     String note = 'Consultation fee',
-    String? receiverUpiAddress,
     String? receiverName,
   }) async {
+    // A payment without a real receiving VPA must never fire — the intent
+    // would go to a non-existent account and the money would be lost.
+    if (receiverUpiAddress.trim().isEmpty) {
+      return const UpiPaymentResult(outcome: 'failed');
+    }
     try {
       final response = await UpiIndia().startTransaction(
         app: app,
-        receiverUpiId: receiverUpiAddress ?? AppConstants.upiReceiverVpa,
-        receiverName: receiverName ?? AppConstants.upiReceiverName,
+        receiverUpiId: receiverUpiAddress,
+        receiverName: receiverName ?? receiverUpiAddress,
         transactionRefId: transactionRef,
         transactionNote: note,
         amount: amount,

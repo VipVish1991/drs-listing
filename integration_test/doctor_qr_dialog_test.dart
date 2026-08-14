@@ -11,8 +11,8 @@
 /// splash routes to onboarding → login (the test also tolerates booting
 /// straight to login). The QA doctor account (8989898989, "Vippl") owns
 /// two clinics in the live users/doctors tables — an EXISTING user logs
-/// in with just the mobile number (no OTP; OTP 1111 is only for
-/// registration/doctor connection).
+/// in with just the mobile number (no OTP; OTP verification is
+/// server-side and only applies to registration/doctor connection).
 library;
 
 import 'package:flutter/material.dart';

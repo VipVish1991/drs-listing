@@ -254,4 +254,26 @@ void main() {
       expect(result.transactionId, 'TXN123');
     });
   });
+
+  group('UpiPaymentService.pay (receiver guard)', () {
+    final service = UpiPaymentService.instance;
+
+    test('a blank receiver VPA returns failed WITHOUT firing an intent',
+        () async {
+      // Regression: the old app-wide fallback VPA ('drslisting@upi') was a
+      // placeholder that cannot receive money — firing an intent to it
+      // made online payments never complete and stored a fake UPI ID. The
+      // service must refuse to pay without a real receiving address, and
+      // the guard returns before any platform channel call (safe on the
+      // test host with no mocked channel).
+      final result = await service.pay(
+        app: UpiApp('Google Pay', 'com.google.android.apps.nbu.paisa.user'),
+        amount: 800,
+        transactionRef: 'APT123',
+        receiverUpiAddress: '   ',
+      );
+      expect(result.isFailed, isTrue);
+      expect(result.proceedWithBooking, isFalse);
+    });
+  });
 }

@@ -28,10 +28,11 @@ class _TestAuthController extends AuthController {
 }
 
 /// AppointmentController double whose patient ALREADY holds bookings — the
-/// one-doctor-at-a-time gate (active Pending/Upcoming booking, or within
-/// the 12h cooldown of the last booking) must block the screen. Provides
-/// real slots for tomorrow so a date chip is tappable, and counts how many
-/// times [bookAppointment] is invoked (must stay 0 while blocked).
+/// per-doctor gate (an active Pending/Upcoming booking with the SAME
+/// doctor) must block the screen for that doctor, while other doctors and
+/// completed/cancelled bookings stay bookable. Provides real slots for
+/// tomorrow so a date chip is tappable, and counts how many times
+/// [bookAppointment] is invoked (must stay 0 while blocked).
 class _GateBlockedAppointmentController extends AppointmentController {
   static const _fullDayNames = [
     'Monday',
@@ -44,7 +45,7 @@ class _GateBlockedAppointmentController extends AppointmentController {
   ];
 
   /// The patient's existing appointments — the gate input. Defaults to one
-  /// active Upcoming booking created just now.
+  /// active Upcoming booking with the doctor being booked ('book_gate_1').
   final List<AppointmentModel> existing;
 
   /// How many times [bookAppointment] was invoked. Blocked bookings must
@@ -57,6 +58,7 @@ class _GateBlockedAppointmentController extends AppointmentController {
               AppointmentModel(
                 appointmentId: 'APT-existing-1',
                 status: AppointmentStatus.upcoming,
+                doctorPlaceId: 'book_gate_1',
                 createdAt: DateTime.now(),
               ),
             ];
@@ -189,8 +191,8 @@ void main() {
     Get.put<AuthController>(_TestAuthController(), permanent: true);
   });
 
-  testWidgets('shows the one-doctor-at-a-time banner when the patient '
-      'already has an active booking', (tester) async {
+  testWidgets('shows the per-doctor banner when the patient already has '
+      'an active booking with this doctor', (tester) async {
     Get.put<AppointmentController>(
       _GateBlockedAppointmentController(),
       permanent: true,
@@ -201,7 +203,7 @@ void main() {
     // The amber gate notice explains the rule — visible on open, before
     // any tap.
     expect(
-      find.textContaining('already have an appointment booked'),
+      find.textContaining('active appointment with this doctor'),
       findsOneWidget,
     );
   });
@@ -224,7 +226,7 @@ void main() {
     // The gate message appears TWICE now: the persistent banner plus the
     // Book-tap snackbar. No success popup, no booking call.
     expect(
-      find.textContaining('already have an appointment booked'),
+      find.textContaining('active appointment with this doctor'),
       findsNWidgets(2),
     );
     expect(controller.bookAppointmentCalls, 0);
@@ -235,35 +237,68 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('shows the 12h-cooldown banner for a recently completed '
-      'booking', (tester) async {
-    // Completed bookings still trigger the wait: the next booking is only
-    // allowed 12h after the last one was CREATED.
-    Get.put<AppointmentController>(
-      _GateBlockedAppointmentController(
-        existing: [
-          AppointmentModel(
-            appointmentId: 'APT-completed-1',
-            status: AppointmentStatus.completed,
-            createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-          ),
-        ],
-      ),
-      permanent: true,
+  testWidgets('allows booking with a DIFFERENT doctor while one is active',
+      (tester) async {
+    final controller = _GateBlockedAppointmentController(
+      existing: [
+        AppointmentModel(
+          appointmentId: 'APT-other-active-1',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'other_doctor_place',
+          createdAt: DateTime.now(),
+        ),
+      ],
     );
+    Get.put<AppointmentController>(controller, permanent: true);
 
     await _pumpBookingFlow(tester);
 
+    // No banner — an active booking with another doctor never blocks.
     expect(
-      find.textContaining('12 hours after your last booking'),
-      findsOneWidget,
-    );
-
-    // The cooldown notice names the remaining time (10 h from a 2h-old
-    // booking) — not the active-booking wording.
-    expect(
-      find.textContaining('already have an appointment booked'),
+      find.textContaining('active appointment with this doctor'),
       findsNothing,
     );
+
+    // A valid selection books straight through.
+    await _tapBookWithValidSelection(tester);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.bookAppointmentCalls, 1);
+
+    // Settle the success dialog + navigation timers.
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('allows rebooking the same doctor immediately after a '
+      'Completed booking (no cooldown)', (tester) async {
+    final controller = _GateBlockedAppointmentController(
+      existing: [
+        AppointmentModel(
+          appointmentId: 'APT-completed-1',
+          status: AppointmentStatus.completed,
+          doctorPlaceId: 'book_gate_1',
+          createdAt: DateTime.now().subtract(const Duration(hours: 2)),
+        ),
+      ],
+    );
+    Get.put<AppointmentController>(controller, permanent: true);
+
+    await _pumpBookingFlow(tester);
+
+    // Completed bookings no longer trigger a wait — no banner at all.
+    expect(
+      find.textContaining('active appointment with this doctor'),
+      findsNothing,
+    );
+
+    // A valid selection books straight through.
+    await _tapBookWithValidSelection(tester);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.bookAppointmentCalls, 1);
+    expect(find.text('Appointment Booked!'), findsOneWidget);
+
+    // Settle the success dialog + navigation timers.
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
   });
 }

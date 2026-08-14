@@ -28,11 +28,30 @@ class _TestAuthController extends AuthController {
 /// Counts `register()` invocations and can hold the call in-flight via
 /// [gate] so the test can fire a second verification while the first is
 /// still pending (the exact race the re-entry guard is for).
+///
+/// Mimics the SERVER-verified OTP contract: [requestOtp] returns the demo
+/// code and [verifyOtp] accepts only the code that was issued.
 class _FakeAuthService extends AuthService {
   _FakeAuthService() : super.testing();
 
   int registerCalls = 0;
+  int requestOtpCalls = 0;
   Completer<UserModel>? gate;
+
+  /// The code [requestOtp] issues (demo mode — the server returns it so
+  /// the app can display it).
+  String serverOtp = '123456';
+
+  @override
+  Future<String?> requestOtp(String mobile) async {
+    requestOtpCalls++;
+    return serverOtp;
+  }
+
+  @override
+  Future<bool> verifyOtp(String mobile, String otp) async {
+    return otp == serverOtp;
+  }
 
   @override
   Future<UserModel> register(
@@ -103,23 +122,24 @@ void main() {
 
   group('OtpVerificationScreen verification', () {
     testWidgets(
-      'default OTP 1111 is pre-filled and verifies with exactly one '
+      'server-minted OTP is pre-filled and verifies with exactly one '
       'register() call',
       (tester) async {
         final fake = _FakeAuthService();
 
         await _pumpOtpScreen(tester, authService: fake);
 
-        // The default OTP '1111' is pre-filled → each pin box renders
-        // the digit '1'. (find.text matches both the rendered Text and
-        // the underlying EditableText per box, so assert a lower bound.)
-        expect(find.text('1'), findsAtLeastNWidgets(4));
+        // The server-minted OTP '123456' was fetched and pre-filled → the
+        // pill shows it (demo mode) and the pin boxes render its digits.
+        expect(find.text('Demo OTP: 123456'), findsOneWidget);
+        expect(find.text('1'), findsAtLeastNWidgets(1));
         expect(find.text('Verify & Continue'), findsOneWidget);
+        expect(fake.requestOtpCalls, 1);
 
         await tester.tap(find.text('Verify & Continue'));
         await tester.pumpAndSettle();
 
-        // Exactly one register() was made with the correct payload.
+        // The server accepted the code → exactly one register() ran.
         expect(fake.registerCalls, 1);
         // Patient registration lands on the patient home.
         expect(find.text('PATIENT HOME'), findsOneWidget);
@@ -225,20 +245,20 @@ void main() {
       await _flushResendTimer(tester);
     });
 
-    testWidgets('non-default OTP is rejected without calling register()', (
-      tester,
-    ) async {
+    testWidgets('non-server-issued OTP is rejected without calling '
+        'register()', (tester) async {
       final fake = _FakeAuthService();
 
       await _pumpOtpScreen(tester, authService: fake);
 
-      // Simulate the user replacing the pre-filled 1111 with 2222. The
+      // Simulate the user replacing the pre-filled code with a WRONG one
+      // (the fake's verify_otp accepts only the issued '123456'). The
       // screen shares its private controller with the PinCodeTextField,
       // so writing through the widget's controller is equivalent to
       // typing.
       final pinField =
           tester.widget<PinCodeTextField>(find.byType(PinCodeTextField));
-      pinField.controller?.text = '2222';
+      pinField.controller?.text = '222222';
       await tester.pump();
 
       await tester.tap(find.text('Verify & Continue'));
@@ -255,16 +275,16 @@ void main() {
     });
 
     testWidgets(
-      'a completed dev code auto-submits and wrong codes are '
+      'a completed code auto-submits and wrong codes are '
       'rejected',
       (tester) async {
         final fake = _FakeAuthService();
 
         await _pumpOtpScreen(tester, authService: fake);
 
-        // Replace the pre-filled 1111 with 2222 (4 digits = complete) →
-        // auto-submit rejects it without registering.
-        await tester.enterText(find.byType(PinCodeTextField), '2222');
+        // Replace the pre-filled code with a wrong 6-digit one (= complete
+        // → auto-submit) → rejected without registering.
+        await tester.enterText(find.byType(PinCodeTextField), '222222');
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
 

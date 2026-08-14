@@ -68,6 +68,13 @@ class AppConstants {
   // deployed Edge Function (see supabase/deploy_notifications.py).
   static const String notifySharedSecret = 'n9Kq4Zx7Vm2Lp8Rt5Ys3Cb6Hf1Wj0AeD';
 
+  /// Shared token that gates the places-proxy Edge Function, appended as
+  /// the `token` query param on every proxy request — same pattern as the
+  /// booking/notify secrets (extractable from the app, but it stops random
+  /// traffic from burning the Google Maps API quota). Must match the
+  /// PLACES_SHARED_SECRET env var set on the deployed Edge Function.
+  static const String placesProxyToken = 'pL4sT9xKq2Wv7YmR5Hc3Nb8Fg1Jd0UeA';
+
   /// URL of the notifications Edge Function (FCM push sending).
   static String get notifyFunctionUrl =>
       '$supabaseUrl/functions/v1/notifications';
@@ -135,12 +142,12 @@ class AppConstants {
   static const String groqModel = 'llama-3.3-70b-versatile';
 
   // ── UPI payments (upi_india) ─────────────────────────────────
-  // The merchant/doctor UPI VPA that receives online consultation fees, and
-  // the display name shown to the payer inside the UPI app. Replace
-  // upiReceiverVpa with the clinic's real VPA (e.g. 'clinic@okhdfcbank')
-  // before going live — it is baked into every UPI payment intent.
-  static const String upiReceiverVpa = 'drslisting@upi'; // TODO: set real VPA
-  static const String upiReceiverName = 'DrsListing Clinic';
+  // Online consultation fees are paid to the BOOKED DOCTOR's own UPI VPA
+  // (doctors.upi_id, set on the profile screen). There is deliberately NO
+  // app-wide fallback VPA: a placeholder like 'drslisting@upi' cannot
+  // receive money, so the booking flow only offers Online Pay when the
+  // doctor has set a real UPI ID (otherwise the patient pays at the
+  // clinic).
 
   // App Settings
   static const int splashDuration = 3; // seconds

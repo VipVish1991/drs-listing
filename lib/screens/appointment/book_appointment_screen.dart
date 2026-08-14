@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shimmer/shimmer.dart';
-import '../../config/constants.dart';
 import '../../config/theme.dart';
 import '../../controllers/appointment_controller.dart';
 import '../../controllers/auth_controller.dart';
@@ -59,11 +58,10 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
   /// Whether slots are still loading.
   bool _slotsLoading = true;
 
-  /// Why the "one patient, one doctor at a time" gate blocks this booking
-  /// right now (an active Pending/Upcoming booking, or within the 12h
-  /// cooldown from the last booking), or null when booking is allowed.
-  /// Populated when the screen loads the patient's appointments and
-  /// re-checked right before the Book action.
+  /// Why the per-doctor gate blocks this booking right now (an active
+  /// Pending/Upcoming booking with THIS doctor), or null when booking is
+  /// allowed. Populated when the screen loads the patient's appointments
+  /// and re-checked right before the Book action.
   String? _bookingBlockMessage;
 
   /// ISO date keys (yyyy-MM-dd) inside the 14-day window that the doctor
@@ -75,8 +73,9 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
   late final List<_DateOption> dateOptions;
 
   /// The booked doctor's own UPI VPA (trimmed), or null when the doctor
-  /// hasn't set one — the payment service then falls back to the app-wide
-  /// default [AppConstants.upiReceiverVpa].
+  /// hasn't set one. Online Pay (UPI) is ONLY offered when this is set —
+  /// a payment without a real receiving VPA can never complete, so the
+  /// patient pays at the clinic instead.
   String? get _doctorUpiVpa {
     final upi = doctor.upiId?.trim() ?? '';
     return upi.isEmpty ? null : upi;
@@ -171,8 +170,8 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     await Future.wait([
       _controller.loadDoctorSlots(doctor.placeId),
       _controller.loadBookedSlots(doctor.placeId),
-      // Refresh the patient's own appointments so the one-doctor-at-a-time
-      // gate (active booking / 12h cooldown) reflects the latest state.
+      // Refresh the patient's own appointments so the per-doctor gate
+      // (active booking with this doctor) reflects the latest state.
       _controller.loadAppointments(),
     ]);
     if (!mounted) return;
@@ -192,6 +191,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       _slotsLoading = false;
       _bookingBlockMessage = AppointmentController.bookingBlockMessage(
         _controller.appointments,
+        doctorPlaceId: doctor.placeId,
       );
       // Pre-select today's next available (future) slot so the patient
       // can book in one tap instead of picking a date + time first.
@@ -245,12 +245,13 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     // strictly "set by THIS attempt" when the failure branch reads it.
     _controller.serverBookingBlockMessage = null;
 
-    // One patient, one doctor at a time: a fresh appointments fetch + the
-    // gate (an active Pending/Upcoming booking, or within the 12h cooldown
-    // from the last booking) blocks the booking with a clear message.
+    // One active booking per doctor: a fresh appointments fetch + the
+    // gate (an active Pending/Upcoming booking with THIS doctor) blocks
+    // the booking with a clear message. Other doctors stay bookable.
     await _controller.loadAppointments();
     final blockMessage = AppointmentController.bookingBlockMessage(
       _controller.appointments,
+      doctorPlaceId: doctor.placeId,
     );
     if (blockMessage != null) {
       showErrorSnackbar(blockMessage);
@@ -351,7 +352,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
         paymentStatus: 'Paid',
         amount: fee.toDouble(),
         transactionId: upiResult!.transactionId,
-        upiId: _doctorUpiVpa ?? AppConstants.upiReceiverVpa,
+        upiId: _doctorUpiVpa,
       );
     }
 
@@ -393,11 +394,12 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
         }
       });
     } else {
-      // The DB-level one-active-booking gate rejected the insert (the
-      // patient booked on another device, or a previous booking landed,
-      // in the window since the screen's pre-book check — a UPI payment
-      // can take minutes) — surface the real gate message + banner instead
-      // of the generic failure text. The message is consumed once.
+      // The DB-level one-active-booking-per-doctor gate rejected the
+      // insert (the patient booked on another device, or a previous
+      // booking landed, in the window since the screen's pre-book check —
+      // a UPI payment can take minutes) — surface the real gate message +
+      // banner instead of the generic failure text. The message is
+      // consumed once.
       final gateMsg = _controller.serverBookingBlockMessage;
       if (gateMsg != null) {
         showErrorSnackbar(gateMsg);
@@ -503,13 +505,51 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
               ],
             ),
             const SizedBox(height: 18),
-            PaymentMethodTile(
-              icon: Icons.qr_code_2_rounded,
-              title: 'Online Pay (UPI)',
-              subtitle: 'Pay ₹$fee now via GPay / PhonePe / Paytm',
-              color: AppColors.primary,
-              onTap: () => Get.back(result: 'online'),
-            ),
+            // Online Pay is only offered when the doctor has set a real
+            // UPI ID — without one there is no account that can receive
+            // the money, so the intent would fail (or worse, point at a
+            // non-existent VPA). No doctor UPI ID → the patient pays at
+            // the clinic.
+            if (_doctorUpiVpa != null)
+              PaymentMethodTile(
+                icon: Icons.qr_code_2_rounded,
+                title: 'Online Pay (UPI)',
+                subtitle: 'Pay ₹$fee now via GPay / PhonePe / Paytm',
+                color: AppColors.primary,
+                onTap: () => Get.back(result: 'online'),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.warning.withAlpha(12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline_rounded,
+                      size: 18,
+                      color: AppColors.warning,
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Online payment not available for this clinic yet — '
+                        'please pay at the clinic.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.35,
+                          color: AppColors.textHeading,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             const SizedBox(height: 10),
             PaymentMethodTile(
               icon: Icons.storefront_rounded,
@@ -536,6 +576,17 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     String type,
     int fee,
   ) async {
+    // Safety net: never fire a UPI intent without a real receiving VPA
+    // (the sheet already hides Online Pay in this case, but the booking
+    // flow must not attempt a payment to a non-existent account).
+    final upiVpa = _doctorUpiVpa;
+    if (upiVpa == null) {
+      showErrorSnackbar(
+        'Online payment is not available for this clinic. Please choose '
+        'Offline Pay.',
+      );
+      return (_OnlinePayOutcome.cancelled, null);
+    }
     while (true) {
       final apps = await UpiPaymentService.instance.getInstalledUpiApps();
       if (apps.isEmpty) {
@@ -553,7 +604,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       final app = await UpiAppPickerSheet.show(
         context,
         apps,
-        payeeUpiId: _doctorUpiVpa,
+        payeeUpiId: upiVpa,
         payeeName: doctor.name,
       );
       if (app == null) return (_OnlinePayOutcome.cancelled, null);
@@ -564,10 +615,10 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
         amount: fee.toDouble(),
         transactionRef: txnRef,
         note: '${_typeLabel(type)} fee — ${doctor.name}',
-        // Pay straight into the clinic's own account when the doctor has
-        // set a UPI ID; otherwise the app-wide default VPA is used.
-        receiverUpiAddress: _doctorUpiVpa,
-        receiverName: _doctorUpiVpa != null ? doctor.name : null,
+        // Pay straight into the clinic's own account — the doctor's UPI
+        // ID, verified non-null by the guard above.
+        receiverUpiAddress: upiVpa,
+        receiverName: doctor.name,
       );
 
       if (result.isSuccess) {
@@ -734,7 +785,9 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       paymentMethod: 'offline',
       paymentStatus: 'Pending',
       amount: fee.toDouble(),
-      upiId: _doctorUpiVpa ?? AppConstants.upiReceiverVpa,
+      // The clinic's receiving VPA when set — null otherwise (an offline
+      // pay-at-clinic record must not carry a fake address).
+      upiId: _doctorUpiVpa,
     );
   }
 
@@ -882,11 +935,11 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
               // ── Doctor card ──
               _buildDoctorCard(isDark, textColor, surfaceColor),
 
-              // ── One-doctor-at-a-time gate notice ──
-              // Shown while the patient can't book right now (an active
-              // Pending/Upcoming booking, or within the 12h cooldown from
-              // the last booking) — explains why and when the next slot
-              // opens, so the block is never a surprise.
+              // ── Per-doctor gate notice ──
+              // Shown while the patient can't book THIS doctor right now
+              // (an active Pending/Upcoming booking with them) — explains
+              // why, so the block is never a surprise. Other doctors stay
+              // bookable.
               if (_bookingBlockMessage != null) ...[
                 const SizedBox(height: 16),
                 BookingBlockBanner(message: _bookingBlockMessage!),

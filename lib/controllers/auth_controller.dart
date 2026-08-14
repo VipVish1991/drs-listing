@@ -456,11 +456,16 @@ class AuthController extends GetxController {
   Future<void> showConnectedDialog(DoctorModel doctor) async {
     if (Get.context == null) return;
 
-    final defaultOtp = '1111';
-    final otpController = TextEditingController(text: defaultOtp);
+    // Server-verified OTP (no universal 1111). A fresh code is minted via
+    // request_otp (demo mode — the server returns it so the dialog can
+    // display it) and checked via verify_otp before connecting. Null until
+    // the fetch resolves; the UI shows a 'Requesting code…' hint meanwhile.
+    String? serverOtp;
+    final mobile = currentUser.value?.mobile ?? '';
+    final otpController = TextEditingController();
     final focusNode = FocusNode();
     final otpError = ValueNotifier<String?>('');
-    final otpValue = ValueNotifier<String>(defaultOtp);
+    final otpValue = ValueNotifier<String>('');
 
     // ── Persistent state notifiers (live OUTSIDE the builder so values
     //     survive StatefulBuilder rebuilds; local variables get reset) ──
@@ -502,12 +507,25 @@ class AuthController extends GetxController {
             });
           }
 
+          // ── Mint a fresh server OTP (best-effort; the UI degrades to
+          //     a Resend hint on failure instead of blocking the dialog) ──
+          Future<void> loadOtp() async {
+            serverOtp = await _supabase.requestOtp(mobile);
+            if (serverOtp != null) {
+              otpController.text = serverOtp!;
+              otpValue.value = serverOtp!;
+            }
+            setDialogState(() {});
+          }
+
           // Auto-start the countdown when the dialog first opens
           if (phase == 'otp' &&
               resendSecsNotifier.value == 30 &&
               !otpResendableNotifier.value &&
               resendTimer == null) {
             startResendTimer();
+            // Mint the first code once the dialog is live.
+            loadOtp();
           }
 
           // ──────────────── PHASE 3: SUCCESS ────────────────
@@ -774,7 +792,9 @@ class AuthController extends GetxController {
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              'Default OTP: $defaultOtp',
+                              serverOtp == null
+                                  ? 'Requesting code…'
+                                  : 'Demo OTP: $serverOtp',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: AppColors.accent.withAlpha(200),
@@ -790,12 +810,14 @@ class AuthController extends GetxController {
                                 ? TextButton(
                                     onPressed: () {
                                       if (!otpResendable) return;
-                                      otpController.text = defaultOtp;
-                                      otpValue.value = defaultOtp;
+                                      otpController.text = '';
+                                      otpValue.value = '';
                                       otpError.value = '';
+                                      serverOtp = null;
+                                      loadOtp();
                                       Get.snackbar(
                                         'Code Resent',
-                                        'A new verification code has been sent.',
+                                        'A new verification code has been generated.',
                                         snackPosition: SnackPosition.BOTTOM,
                                         backgroundColor: AppColors.success,
                                         colorText: Colors.white,
@@ -877,14 +899,21 @@ class AuthController extends GetxController {
                                       FocusScope.of(context).unfocus();
 
                                       final otp = otpValue.value;
-                                      if (otp.length != 4 ||
-                                          !RegExp(r'^\d{4}$').hasMatch(otp)) {
+                                      if (otp.length != 6 ||
+                                          !RegExp(r'^\d{6}$').hasMatch(otp)) {
                                         otpError.value =
                                             'Please enter a valid '
-                                            '4-digit code';
+                                            '6-digit code';
                                         return;
                                       }
-                                      if (otp != defaultOtp) {
+
+                                      // Server-side verification — no
+                                      // universal code. Failure (wrong /
+                                      // expired / too many attempts /
+                                      // network) blocks the connect.
+                                      final verified = await _supabase
+                                          .verifyOtp(mobile, otp);
+                                      if (!verified) {
                                         otpError.value =
                                             'Invalid code. '
                                             'Please try again.';

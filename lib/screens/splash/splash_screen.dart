@@ -197,9 +197,10 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Consistent with the rest of the app, the status bar is solid BLACK
-    // with white icons even on the dark green splash — this local override
-    // wins over the app-wide style while this screen is visible.
+    // The rest of the app uses a WHITE status bar with black text, but
+    // the splash is a dark green gradient — a white bar would look broken
+    // over it, so this local override keeps the dark bar with white icons
+    // while this screen is visible.
     // (statusBarBrightness is the iOS-only field: kept dark here so the
     // status-bar text stays WHITE over the splash's dark gradient.)
     return AnnotatedRegion<SystemUiOverlayStyle>(
