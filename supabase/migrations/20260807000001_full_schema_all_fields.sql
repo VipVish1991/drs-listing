@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS public.users (
     device_tokens   JSONB NOT NULL DEFAULT '[]'::jsonb,
     notification_prefs JSONB NOT NULL DEFAULT
         '{"appointment_booked": true, "appointment_cancelled": true, "appointment_rescheduled": true, "appointment_status_changed": true, "all": true}'::jsonb,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -49,6 +50,7 @@ COMMENT ON COLUMN public.users.role IS 'User role: patient (default) or doctor';
 COMMENT ON COLUMN public.users.doctor_place_id IS 'Google Place ID of the clinic/doctor this user manages, if role = doctor';
 COMMENT ON COLUMN public.users.device_tokens IS 'FCM device registration tokens for push notifications. Array of {token, platform, updated_at} objects — one per device. Managed only via add_device_token() / remove_device_token().';
 COMMENT ON COLUMN public.users.notification_prefs IS 'Per-user push-notification preferences. JSONB map of event name → bool (appointment_booked, appointment_cancelled, appointment_rescheduled, appointment_status_changed) plus a master key `all` checked FIRST by the notifications Edge Function — false disables every alert at once while the per-event keys stay preserved. A missing key or true means "send"; false means "skip". Defaults to all events + master enabled.';
+COMMENT ON COLUMN public.users.is_active IS 'Account status: TRUE = active (can log in), FALSE = inactive (login blocked, user told to contact support). Defaults to TRUE.';
 
 -- Indexes for mobile lookup and doctor dashboard join. Both names are
 -- declared by the incremental chain (20240801000001 adds
@@ -513,110 +515,6 @@ GRANT UPDATE (payment_status, paid_at, updated_at)
     ON public.payments TO anon, authenticated;
 
 
--- ============================================================================
--- 9. OTP REQUESTS TABLE (server-verified OTP, replaces hardcoded 1111)
--- ============================================================================
--- Mirrors 20260814000001_server_verified_otp.sql. request_otp() mints a
--- 6-digit code (hash-only storage, 10-min expiry, 30s cooldown) and
--- returns it for DEMO display (no SMS provider); verify_otp() checks
--- hash, expiry, 5-attempt limit, single-use. Production: replace the
--- `RETURN v_otp;` with an SMS send.
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
-CREATE TABLE IF NOT EXISTS public.otp_requests (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    mobile      TEXT NOT NULL,
-    otp_hash    TEXT NOT NULL,
-    expires_at  TIMESTAMPTZ NOT NULL,
-    attempts    INT NOT NULL DEFAULT 0,
-    used_at     TIMESTAMPTZ,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_otp_requests_mobile
-    ON public.otp_requests (mobile, created_at DESC);
-
-CREATE OR REPLACE FUNCTION public.request_otp(p_mobile TEXT)
-RETURNS TEXT
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    v_mobile  TEXT;
-    v_otp     TEXT;
-    v_recent  TIMESTAMPTZ;
-BEGIN
-    v_mobile := btrim(p_mobile);
-    IF v_mobile = '' OR v_mobile ~ '[^0-9]' OR length(v_mobile) < 10 THEN
-        RAISE EXCEPTION 'Invalid mobile number' USING ERRCODE = 'P0001';
-    END IF;
-    SELECT MAX(created_at) INTO v_recent
-      FROM public.otp_requests
-     WHERE mobile = v_mobile;
-    IF v_recent IS NOT NULL AND (NOW() - v_recent) < interval '30 seconds' THEN
-        RAISE EXCEPTION 'Please wait before requesting another code'
-            USING ERRCODE = 'P0001';
-    END IF;
-    v_otp := lpad(floor(random() * 1000000)::int::text, 6, '0');
-    INSERT INTO public.otp_requests (mobile, otp_hash, expires_at)
-    VALUES (
-        v_mobile,
-        encode(digest(v_otp, 'sha256'), 'hex'),
-        NOW() + interval '10 minutes'
-    );
-    RETURN v_otp; -- DEMO MODE: app displays it. Production: SMS instead.
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION public.verify_otp(p_mobile TEXT, p_otp TEXT)
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    v_mobile  TEXT;
-    v_otp     TEXT;
-    v_row     public.otp_requests%ROWTYPE;
-    v_hash    TEXT;
-BEGIN
-    v_mobile := btrim(p_mobile);
-    v_otp    := btrim(p_otp);
-    IF v_mobile = '' OR v_otp = '' THEN
-        RETURN FALSE;
-    END IF;
-    SELECT * INTO v_row
-      FROM public.otp_requests
-     WHERE mobile = v_mobile
-       AND used_at IS NULL
-     ORDER BY created_at DESC
-     LIMIT 1;
-    IF v_row.id IS NULL THEN
-        RETURN FALSE;
-    END IF;
-    IF NOW() > v_row.expires_at THEN
-        RETURN FALSE;
-    END IF;
-    IF v_row.attempts >= 5 THEN
-        RETURN FALSE;
-    END IF;
-    v_hash := encode(digest(v_otp, 'sha256'), 'hex');
-    IF v_hash <> v_row.otp_hash THEN
-        UPDATE public.otp_requests
-           SET attempts = attempts + 1
-         WHERE id = v_row.id;
-        RETURN FALSE;
-    END IF;
-    UPDATE public.otp_requests
-       SET used_at = NOW()
-     WHERE id = v_row.id;
-    RETURN TRUE;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.request_otp(TEXT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.verify_otp(TEXT, TEXT) TO anon, authenticated;
 
 -- Booking screen's minimal "which slots are taken" peek (no patient data).
 -- Matches 20260814000002_harden_ownership_rls.sql.

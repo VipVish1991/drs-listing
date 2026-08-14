@@ -4,15 +4,15 @@ AI-powered healthcare assistant & doctor discovery app.
 
 ## Security Model
 
-**Server-verified OTP (no universal backdoor).** Registration / doctor
-connection verify a code minted by the `request_otp` RPC and checked by
-`verify_otp` — there is no hardcoded `1111` anymore. Each code is unique,
-expires after 10 minutes, allows 5 attempts, is single-use, and has a 30s
-per-mobile cooldown. Codes are stored **hash-only** (SHA-256) — the
-plaintext is never persisted. DEMO MODE: `request_otp` returns the code so
-the app can display it (no SMS provider is wired up). To go production-
-grade, replace the `RETURN v_otp;` in the RPC with an SMS/WhatsApp send.
-Migration: `supabase/migrations/20260814000001_server_verified_otp.sql`.
+**Client-side demo OTP (no universal backdoor).** Registration / doctor
+connection generate a fresh random 4-digit code **in the app**
+(`generateDemoOtp`, client-side only — no server/SMS involvement) and
+verify the entered code locally against it — there is no hardcoded
+`1111`. The code is surfaced automatically in a top toast ~3s after the
+screen opens (feels like an SMS arriving) and the pin field is NOT
+pre-filled — the user reads the code from the toast and types it in
+manually. To go production-grade, replace this with Supabase Auth +
+phone-OTP delivery.
 
 **Owner-scoped RLS (no mass access with the anon key).** Every table the
 app writes follows the same convention — the caller's UUID travels in the
@@ -41,13 +41,21 @@ the API quota). Secrets are extractable from the app (documented tradeoff,
 same as the booking QR URLs) — they gate casual/automated abuse, not a
 hard auth boundary.
 
+**Account Active/Inactive switch.** Each `users` row has an `is_active`
+boolean (default TRUE). An admin flips it to FALSE to deactivate an
+account: login is refused and any warm-start session is wiped, and the
+user sees *"Your account is inactive. Please contact our support team."*
+Existing rows stay active after the migration. Migration:
+`supabase/migrations/20260814000003_add_users_is_active.sql`.
+
 **Known residual risk (accepted):** the anon key is public and the
 `x-user-id` header is client-settable, so a client that knows a victim's
 UUID could still impersonate them. The hardening removes the
 no-knowledge attacks (mass enumeration, cross-row writes, UPI payment
-hijack) and the universal OTP backdoor; it does not replace real
-Supabase Auth + phone-OTP delivery, which is the documented production
-path.
+hijack); it does not replace real Supabase Auth + phone-OTP delivery,
+which is the documented production path (the current demo OTP is
+client-generated and verified locally — fine for testing, not for
+production).
 
 ## Development Tooling
 

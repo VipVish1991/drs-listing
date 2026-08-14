@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 import '../config/theme.dart';
 
@@ -11,6 +12,23 @@ void showErrorSnackbar(String message) {
     message,
     backgroundColor: AppColors.error,
     colorText: AppColors.textWhite,
+  );
+}
+
+/// Shows a top snackbar with the server-minted OTP code for DEMO/testing
+/// — the code would normally arrive by SMS, but in demo mode the server
+/// returns it so the app can display it. Safe in tests (no-op without an
+/// overlay context).
+void showDemoOtpToast(String code) {
+  if (Get.context == null) return;
+  Get.snackbar(
+    'Verification code',
+    'Your 4-digit OTP: $code',
+    backgroundColor: AppColors.success,
+    colorText: AppColors.textWhite,
+    duration: const Duration(seconds: 6),
+    margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+    borderRadius: 14,
   );
 }
 

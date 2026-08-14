@@ -35,6 +35,11 @@ class SupabaseService {
   factory SupabaseService() => _instance;
   SupabaseService._internal();
 
+  /// Creates an unshared instance for subclassing in tests (mirrors
+  /// [AuthService.testing]) or for injection into other services. No
+  /// platform channels are touched at construction.
+  SupabaseService.testing();
+
   SupabaseClient get client => Supabase.instance.client;
 
   Future<void> init() async {
@@ -108,44 +113,6 @@ class SupabaseService {
           .single();
       return response;
     });
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // OTP verification (server-side, replaces the old hardcoded 1111)
-  // ═══════════════════════════════════════════════════════════════
-  /// Mint a fresh OTP for [mobile] via the `request_otp` RPC and return
-  /// the code. DEMO MODE: the RPC returns the code so the app can display
-  /// it (no SMS provider is wired up). Returns `null` on any failure
-  /// (network, cooldown, invalid mobile) so screens can degrade gracefully
-  /// instead of crashing.
-  Future<String?> requestOtp(String mobile) async {
-    try {
-      final result = await client.rpc('request_otp', params: {
-        'p_mobile': mobile,
-      });
-      return result as String?;
-    } catch (e) {
-      debugPrint('⚠️ [requestOtp] failed: $e');
-      return null;
-    }
-  }
-
-  /// Verify [otp] against the server for [mobile] via the `verify_otp`
-  /// RPC. Returns `true` only when the server accepted the code (correct,
-  /// unexpired, within attempt limit, single-use). Returns `false` on a
-  /// wrong/expired code OR a network failure — the caller can't tell the
-  /// difference, so screens treat both as "verification failed".
-  Future<bool> verifyOtp(String mobile, String otp) async {
-    try {
-      final result = await client.rpc('verify_otp', params: {
-        'p_mobile': mobile,
-        'p_otp': otp,
-      });
-      return result == true;
-    } catch (e) {
-      debugPrint('⚠️ [verifyOtp] failed: $e');
-      return false;
-    }
   }
 
   /// Register (or refresh) an FCM device token on the caller's own row.
@@ -766,6 +733,19 @@ class SupabaseService {
         .maybeSingle();
     if (response == null) return null;
     return DoctorModel.fromJson(response);
+  }
+
+  /// Returns the Google Place IDs of every clinic/hospital/doctor already
+  /// registered in the `doctors` table. Registration mode uses this to
+  /// disable the nearby-Google-result card for any place that is already
+  /// registered (you can't claim a clinic someone else manages). SELECT on
+  /// `doctors` stays open, so this works without any ownership headers.
+  Future<List<String>> getRegisteredDoctorPlaceIds() async {
+    final rows = await client.from('doctors').select('place_id');
+    return rows
+        .map((r) => r['place_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toList();
   }
 
   /// Persist a doctor's unavailable date ranges (leave / holiday) without

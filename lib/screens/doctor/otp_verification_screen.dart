@@ -11,17 +11,16 @@ import '../../models/doctor_model.dart';
 import '../../models/user_model.dart';
 import '../../routes/app_routes.dart';
 import '../../services/auth_service.dart';
+import '../../utils/otp_generator.dart';
 import '../../utils/snackbar_helpers.dart';
 import '../../widgets/app_button.dart';
 
 /// OTP verification screen used for both patient and doctor registration.
 ///
-/// Server-verified OTP: the screen mints a fresh code via
-/// [AuthService.requestOtp] (demo mode — the server returns the code so
-/// the app can display it; no SMS is sent) and verifies it via
-/// [AuthService.verifyOtp] before registering. There is NO universal
-/// hardcoded code: each code is unique, expires in 10 minutes, is
-/// single-use, and allows 5 attempts.
+/// Client-side OTP: the screen generates a fresh random 4-digit code via
+/// [generateDemoOtp] (no server/SMS involved — the code is shown in a top
+/// toast for demo/testing) and verifies the entered code locally against
+/// it before registering. There is NO universal hardcoded code.
 ///
 /// After a successful verification the user is registered with
 /// [AuthService.register] and routed to the role-appropriate destination.
@@ -45,6 +44,15 @@ class OtpVerificationScreen extends StatefulWidget {
   /// many `register()` calls the verification flow makes.
   final AuthService? authService;
 
+  /// Injectable for tests — production callers omit it and the screen
+  /// generates a random code via [generateDemoOtp]. Tests pass a fixed
+  /// code so they can assert the toast + local verification.
+  final String Function()? otpGenerator;
+
+  /// Delay before the OTP "arrives" (the toast shows) — feels like a real
+  /// SMS send. Kept on the widget so tests can shorten it.
+  final Duration otpSendDelay;
+
   const OtpVerificationScreen({
     super.key,
     required this.displayName,
@@ -52,6 +60,8 @@ class OtpVerificationScreen extends StatefulWidget {
     this.role = UserModel.roleDoctor,
     this.doctor,
     this.authService,
+    this.otpGenerator,
+    this.otpSendDelay = const Duration(seconds: 3),
   });
 
   @override
@@ -59,9 +69,9 @@ class OtpVerificationScreen extends StatefulWidget {
 }
 
 class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
-  /// The server-minted OTP (demo mode — displayed to the user). Fetched
-  /// in [initState] (and on resend) via [AuthService.requestOtp].
-  String? _serverOtp;
+  /// The client-generated OTP (demo mode — displayed to the user).
+  /// Generated in [initState] (and on resend) via [generateDemoOtp].
+  String? _generatedOtp;
 
   final TextEditingController _pinController = TextEditingController();
   final FocusNode _pinFocusNode = FocusNode();
@@ -70,15 +80,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   int _resendTimer = 15;
   bool _canResend = false;
 
-  /// True while [_loadOtp] is programmatically filling the field.
-  /// PinCodeTextField fires onChanged when the controller text is set on
-  /// an attached field, which would auto-submit the pre-filled code the
-  /// moment the screen opens (before the user has a chance to confirm).
-  /// Guarded so auto-submit only ever fires on genuine user input.
-  bool _isPrefilling = false;
-
-  /// The server OTP is 6 digits.
-  int get _pinLength => 6;
+  /// The server OTP is 4 digits.
+  int get _pinLength => 4;
 
   /// Registration service used by [_verifyOtp]. Defaults to the real
   /// singleton; tests inject a fake via [OtpVerificationScreen.authService].
@@ -94,30 +97,25 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     _loadOtp();
   }
 
-  /// Mint a fresh OTP from the server and pre-fill the pin field.
-  /// Best-effort — a failure leaves the field empty (the user can hit
-  /// Resend) instead of blocking the screen.
+  /// Generates a fresh OTP locally. The code is NOT pre-filled — the
+  /// user reads it from the top toast and types it into the field
+  /// manually. The toast is sent after a short [otpSendDelay] so the flow
+  /// feels like a real SMS arriving.
   Future<void> _loadOtp() async {
-    final otp = await _authService.requestOtp(widget.mobile);
+    final otp = (widget.otpGenerator ?? generateDemoOtp)();
     if (!mounted) return;
     setState(() {
-      _serverOtp = otp;
-      _errorMessage = otp == null
-          ? 'Could not load a verification code. Please tap Resend OTP.'
-          : null;
+      _generatedOtp = otp;
+      _errorMessage = null;
     });
-    if (otp != null) {
-      _isPrefilling = true;
-      _pinController.text = otp;
-      // Keep the cursor at the end of the pre-filled code.
-      _pinController.selection = TextSelection.collapsed(
-        offset: _pinController.text.length,
-      );
-      // Let the field rebuild with the new text, then re-arm user input.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _isPrefilling = false;
-      });
-    }
+    // "Send" the code after the delay. Deferred to after the first frame
+    // — [initState] can run during the build phase, and Get.snackbar
+    // inserts an overlay entry (setState on the Overlay) which would
+    // throw "setState during build".
+    Timer(widget.otpSendDelay, () {
+      if (!mounted) return;
+      showDemoOtpToast(otp);
+    });
   }
 
   @override
@@ -166,10 +164,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       _errorMessage = null;
     });
 
-    // Server-side verification — no universal code. The server checks
-    // correctness, expiry, attempt limit, and single-use.
-    final verified = await _authService.verifyOtp(widget.mobile, otp);
-    if (!mounted) return;
+    // Client-side verification — the entered code must match the code
+    // the app generated for this screen.
+    final verified = otp == _generatedOtp;
     if (!verified) {
       setState(() {
         _isLoading = false;
@@ -184,16 +181,16 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   /// True when [otp] has exactly [_pinLength] digits (the complete code).
   bool _isCompleteOtp(String otp) {
     return otp.length == _pinLength &&
-        RegExp(r'^[0-9]{6}$').hasMatch(otp);
+        RegExp(r'^[0-9]{4}$').hasMatch(otp);
   }
 
   /// Fires [_verifyOtp] automatically once the entered code is complete
   /// (4 digits) — no Verify tap needed. Gated so it can never race the
   /// button.
   void _autoSubmitIfComplete() {
-    // Programmatic pre-fill (the demo code arriving from the server) must
-    // NOT auto-submit — only genuine user input can.
-    if (_isLoading || _isPrefilling) return;
+    // The field is never pre-filled anymore — every value here is genuine
+    // user input, so any complete code auto-submits.
+    if (_isLoading) return;
     final otp = _pinController.text;
     if (!_isCompleteOtp(otp)) return;
     FocusScope.of(context).unfocus();
@@ -228,12 +225,16 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           }
         } else {
           // Fallback: navigate to nearby doctors if connection fails
+          // (always in registration mode so an already-registered doctor
+          // sees the disabled state instead of the normal Connect flow).
           if (mounted) {
             Get.offNamed(
               AppRoutes.nearbyDoctors,
               arguments: {
                 'displayName': widget.displayName,
                 'mobile': widget.mobile,
+                'role': widget.role,
+                'mode': 'register',
               },
             );
           }
@@ -251,6 +252,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           arguments: {
             'displayName': widget.displayName,
             'mobile': widget.mobile,
+            // Keep the nearby list in registration mode for doctors so
+            // an already-registered mobile is detected and disabled.
+            if (widget.role == UserModel.roleDoctor) 'mode': 'register',
           },
         );
       }
@@ -289,13 +293,17 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
             );
             return;
           }
-          // Connection failed → back to the nearby list to retry
+          // Connection failed → back to the nearby list to retry (in
+          // registration mode so an already-registered doctor sees the
+          // disabled state instead of the normal Connect flow).
           if (mounted) {
             Get.offNamed(
               AppRoutes.nearbyDoctors,
               arguments: {
                 'displayName': widget.displayName,
                 'mobile': widget.mobile,
+                'role': widget.role,
+                'mode': 'register',
               },
             );
           }
@@ -310,6 +318,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           arguments: {
             'displayName': widget.displayName,
             'mobile': widget.mobile,
+            // Keep the nearby list in registration mode for doctors so
+            // an already-registered mobile is detected and disabled.
+            if (widget.role == UserModel.roleDoctor) 'mode': 'register',
           },
         );
         return;
@@ -327,8 +338,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   void _resendOtp() {
-    // Server flow: mint a fresh code and pre-fill it (demo mode — the
-    // code is returned so the app can display it).
+    // Client-side flow: generate a fresh code and show it in the top
+    // toast after the send delay (the user types it manually).
     setState(() => _errorMessage = null);
     _pinController.clear();
     _loadOtp();
@@ -520,9 +531,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          _serverOtp == null
-                              ? 'Requesting code…'
-                              : 'Demo OTP: $_serverOtp',
+                          'Demo OTP: $_generatedOtp',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppColors.accent.withAlpha(200),

@@ -67,6 +67,19 @@ void main() {
     expect(find.text('Verify Connection'), findsOneWidget);
     expect(find.text('City Clinic'), findsOneWidget);
 
+    // The dialog auto-shows the demo-OTP toast (top snackbar): the code
+    // is "sent" after a 3s delay, then the snackbar displays for 6s. Pump
+    // past the whole window and force-close any remainder BEFORE tapping
+    // Cancel so the toast can't intercept the hit-test on the dialog's
+    // Cancel button.
+    await tester.pump(const Duration(seconds: 4)); // 3s send delay fires
+    await tester.pump(const Duration(seconds: 7)); // 6s display expires
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    Get.closeAllSnackbars();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+
     // ── Close via Cancel → runs the .then() cleanup that disposes
     //    otpController/focusNode. The double-dispose bug would throw here. ──
     await tester.tap(find.text('Cancel'));

@@ -35,7 +35,7 @@
 -- and the x-user-id header is client-settable, so a client that KNOWS a
 -- victim's UUID could still impersonate them. What this change actually
 -- fixes is the no-knowledge mass attack: a client can no longer read/write
--- rows it has no UUID for. Combined with the server-verified OTP (no more
+-- rows it has no UUID for. Combined with the client-side demo OTP (no
 -- universal 1111), an attacker can no longer trivially become any user.
 -- ============================================================================
 

@@ -8,6 +8,10 @@ class UserModel {
   /// if they are a doctor.  Used on app relaunch to load the correct
   /// doctor profile into DoctorController.
   final String? doctorPlaceId;
+  /// Account status: FALSE = admin-deactivated, login is blocked and the
+  /// app shows "Your account is inactive" instead of letting the user in.
+  /// Defaults to TRUE so legacy/local rows never lock a user out.
+  final bool isActive;
 
   static const String rolePatient = 'patient';
   static const String roleDoctor = 'doctor';
@@ -19,6 +23,7 @@ class UserModel {
     this.role = rolePatient,
     this.createdAt,
     this.doctorPlaceId,
+    this.isActive = true,
   });
 
   bool get isDoctor => role == roleDoctor;
@@ -34,6 +39,9 @@ class UserModel {
           ? DateTime.tryParse(json['created_at'].toString())
           : null,
       doctorPlaceId: json['doctor_place_id']?.toString(),
+      // A missing column (pre-migration rows) must read as ACTIVE, never
+      // lock a user out.
+      isActive: json['is_active'] != false,
     );
   }
 
@@ -45,6 +53,7 @@ class UserModel {
       'role': role,
       'created_at': createdAt?.toIso8601String(),
       if (doctorPlaceId != null) 'doctor_place_id': doctorPlaceId,
+      'is_active': isActive,
     };
   }
 
@@ -55,6 +64,7 @@ class UserModel {
     String? role,
     DateTime? createdAt,
     String? doctorPlaceId,
+    bool? isActive,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -63,6 +73,7 @@ class UserModel {
       role: role ?? this.role,
       createdAt: createdAt ?? this.createdAt,
       doctorPlaceId: doctorPlaceId ?? this.doctorPlaceId,
+      isActive: isActive ?? this.isActive,
     );
   }
 }

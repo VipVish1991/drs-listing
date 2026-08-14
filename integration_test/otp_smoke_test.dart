@@ -26,20 +26,10 @@ class _TestAuthController extends AuthController {
 
 /// Counts `register()` invocations so the smoke test can assert the OTP
 /// verification leads to exactly one registration.
-///
-/// Mimics the SERVER-verified OTP contract: [requestOtp] issues a demo
-/// code and [verifyOtp] accepts only the code that was issued.
 class _FakeAuthService extends AuthService {
   _FakeAuthService() : super.testing();
 
   int registerCalls = 0;
-  final String serverOtp = '654321';
-
-  @override
-  Future<String?> requestOtp(String mobile) async => serverOtp;
-
-  @override
-  Future<bool> verifyOtp(String mobile, String otp) async => otp == serverOtp;
 
   @override
   Future<UserModel> register(
@@ -66,9 +56,9 @@ void main() {
 
   /// Pumps the OTP screen (patient registration) with a fake AuthService
   /// and a registered /home route so the post-verification navigation
-  /// resolves. The OTP screen needs no backend — the fake verifies the
-  /// whole flow on-device without Supabase. Pass [fake] to keep a handle
-  /// on the AuthService after the screen is replaced by the home route.
+  /// resolves. The OTP screen needs no backend — the code is generated
+  /// client-side and verified locally. Pass [fake] to keep a handle on
+  /// the AuthService after the screen is replaced by the home route.
   Future<WidgetTester> pumpOtp(
     WidgetTester tester, {
     _FakeAuthService? fake,
@@ -87,6 +77,8 @@ void main() {
           mobile: '9876543210',
           role: UserModel.rolePatient,
           authService: fake ?? _FakeAuthService(),
+          otpGenerator: () => '654321',
+          otpSendDelay: Duration.zero,
         ),
       ),
     );
@@ -104,19 +96,20 @@ void main() {
   }
 
   testWidgets(
-      'ON-DEVICE: server-minted OTP is pre-filled and verifies to patient '
-      'home', (tester) async {
+      'ON-DEVICE: client-generated OTP is toasted (not pre-filled) and '
+      'verifies to patient home', (tester) async {
     final fake = _FakeAuthService();
     await pumpOtp(tester, fake: fake);
 
-    // Server-minted OTP '654321' pre-filled → the pill shows it (demo
-    // mode), and the Verify button is present.
+    // The toast shows the code (demo mode) but the pin field is NOT
+    // pre-filled — the user must type it manually.
     expect(find.text('Demo OTP: 654321'), findsOneWidget);
     expect(find.text('Verify & Continue'), findsOneWidget);
 
-    // Tap Verify → the server accepts the code, registers exactly once
-    // and lands on the patient home.
-    await tester.tap(find.text('Verify & Continue'));
+    // User types the code from the toast — completing the 4th digit
+    // auto-submits, matches locally, registers exactly once and lands on
+    // the patient home.
+    await tester.enterText(find.byType(PinCodeTextField), '654321');
     await tester.pumpAndSettle();
 
     // The OTP screen is replaced by the home route once verified, so the
@@ -133,10 +126,10 @@ void main() {
     final fake = _FakeAuthService();
     await pumpOtp(tester, fake: fake);
 
-    // Replace the pre-filled 654321 with a wrong 6-digit code.
-    await tester.enterText(find.byType(PinCodeTextField), '222222');
+    // Type a wrong 4-digit code — completing the 4th digit auto-submits
+    // and the mismatch is rejected.
+    await tester.enterText(find.byType(PinCodeTextField), '2222');
     await tester.pump();
-    await tester.tap(find.text('Verify & Continue'));
     await tester.pump();
 
     expect(find.text('Invalid OTP. Please try again.'), findsOneWidget);

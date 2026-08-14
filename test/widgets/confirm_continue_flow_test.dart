@@ -18,6 +18,7 @@ import 'package:DrsListing/screens/doctor/nearby_doctors_screen.dart';
 import 'package:DrsListing/screens/doctor/otp_verification_screen.dart';
 import 'package:DrsListing/services/local_storage_service.dart';
 import 'package:DrsListing/services/places_service.dart';
+import 'package:DrsListing/services/supabase_service.dart';
 
 import '../helpers/test_data.dart';
 
@@ -96,6 +97,29 @@ MockClient _placesMock() {
   });
 }
 
+/// Fake Supabase service for the "already registered as a doctor" check.
+/// [role] is what `users.role` is reported to be for the registration
+/// mobile — 'doctor' blocks registration, anything else allows it.
+/// [registeredPlaceIds] is what the `doctors` table is reported to
+/// contain (Google Place IDs) — a matching nearby result is disabled.
+class _FakeSupabaseService extends SupabaseService {
+  _FakeSupabaseService(this.role, {this.registeredPlaceIds = const []})
+      : super.testing();
+
+  final String? role;
+  final List<String> registeredPlaceIds;
+
+  @override
+  Future<Map<String, dynamic>?> getUserByMobile(String mobile) async {
+    return role == null ? null : {'mobile': mobile, 'role': role};
+  }
+
+  @override
+  Future<List<String>> getRegisteredDoctorPlaceIds() async {
+    return registeredPlaceIds;
+  }
+}
+
 void main() {
   setUpAll(_ensureDotenv);
 
@@ -119,6 +143,7 @@ void main() {
 
   tearDown(() {
     NearbyDoctorsScreen.gpsCheckOverride = null;
+    NearbyDoctorsScreen.supabaseOverride = null;
     // Restore a real client so the mocked PlacesService client never leaks
     // into other test files.
     PlacesService().setClientForTesting(http.Client());
@@ -203,5 +228,183 @@ void main() {
     // Flush the OTP resend countdown chain (15 × 1s timers) so no timers
     // remain pending when the test tears down.
     await tester.pump(const Duration(seconds: 16));
+    // The OTP screen auto-shows the demo-OTP toast (6s display timer) —
+    // let it expire and its hide animation finish while the overlay is
+    // still mounted, then force-close any remainder.
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    Get.closeAllSnackbars();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'registration mode: already-registered mobile disables Select & '
+      'Continue', (tester) async {
+    // Fresh GetX state (controllers + route table) per test.
+    Get.reset();
+    Get.put<AuthController>(_TestAuthController(), permanent: true);
+    PlacesService().setClientForTesting(_placesMock());
+    // The mobile already belongs to a registered doctor → registration
+    // must be blocked.
+    NearbyDoctorsScreen.supabaseOverride =
+        () => _FakeSupabaseService(UserModel.roleDoctor);
+
+    await tester.pumpWidget(
+      GetMaterialApp(
+        theme: AppTheme.lightTheme,
+        home: const Scaffold(body: Center(child: Text('launch'))),
+        getPages: [
+          GetPage(
+            name: AppRoutes.nearbyDoctors,
+            page: () => const NearbyDoctorsScreen(),
+          ),
+        ],
+      ),
+    );
+    // Enter the nearby-clinic screen in doctor-registration mode.
+    Get.toNamed(
+      AppRoutes.nearbyDoctors,
+      arguments: {
+        'mode': 'register',
+        'displayName': 'Dr. Raj',
+        'mobile': '9876543210',
+        'role': UserModel.roleDoctor,
+      },
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // route transition
+    await tester.pump(const Duration(milliseconds: 100)); // mock places load
+    await tester.pump(const Duration(milliseconds: 600)); // card fade-in
+
+    // Registration-mode header + the clinic card are still shown (nearby
+    // data displays for new AND already-registered doctors).
+    expect(find.text('Select Your Clinic'), findsOneWidget);
+    expect(find.text('City Clinic'), findsOneWidget);
+
+    // The already-registered notice is shown and every Select & Continue
+    // button is disabled.
+    expect(
+      find.textContaining('already registered as a doctor'),
+      findsWidgets,
+    );
+    final button = tester.widget<ElevatedButton>(
+      find.ancestor(
+        of: find.text('Select & Continue'),
+        matching: find.bySubtype<ElevatedButton>(),
+      ),
+    );
+    expect(button.onPressed, isNull);
+    expect(find.text('Already registered as a doctor'), findsOneWidget);
+  });
+
+  testWidgets(
+      'registration mode: fresh mobile keeps Select & Continue enabled',
+      (tester) async {
+    // Fresh GetX state (controllers + route table) per test.
+    Get.reset();
+    Get.put<AuthController>(_TestAuthController(), permanent: true);
+    PlacesService().setClientForTesting(_placesMock());
+    // No users row for this mobile → registration allowed.
+    NearbyDoctorsScreen.supabaseOverride = () => _FakeSupabaseService(null);
+
+    await tester.pumpWidget(
+      GetMaterialApp(
+        theme: AppTheme.lightTheme,
+        home: const Scaffold(body: Center(child: Text('launch'))),
+        getPages: [
+          GetPage(
+            name: AppRoutes.nearbyDoctors,
+            page: () => const NearbyDoctorsScreen(),
+          ),
+        ],
+      ),
+    );
+    Get.toNamed(
+      AppRoutes.nearbyDoctors,
+      arguments: {
+        'mode': 'register',
+        'displayName': 'Dr. New',
+        'mobile': '9876543211',
+        'role': UserModel.roleDoctor,
+      },
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // route transition
+    await tester.pump(const Duration(milliseconds: 100)); // mock places load
+    await tester.pump(const Duration(milliseconds: 600)); // card fade-in
+
+    // Nearby data shows and the button stays enabled for a fresh mobile.
+    expect(find.text('Select Your Clinic'), findsOneWidget);
+    expect(find.text('City Clinic'), findsOneWidget);
+    final button = tester.widget<ElevatedButton>(
+      find.ancestor(
+        of: find.text('Select & Continue'),
+        matching: find.bySubtype<ElevatedButton>(),
+      ),
+    );
+    expect(button.onPressed, isNotNull);
+    expect(
+      find.text('Already registered as a doctor'),
+      findsNothing,
+    );
+  });
+
+  testWidgets(
+      'registration mode: a Google result already in the doctors table '
+      'is disabled even for a fresh mobile', (tester) async {
+    // Fresh GetX state (controllers + route table) per test.
+    Get.reset();
+    Get.put<AuthController>(_TestAuthController(), permanent: true);
+    PlacesService().setClientForTesting(_placesMock());
+    // Fresh mobile (no users row) BUT the Google place 'clinic_flow' is
+    // already registered in the doctors table → its card must be disabled.
+    NearbyDoctorsScreen.supabaseOverride = () => _FakeSupabaseService(
+          null,
+          registeredPlaceIds: const ['clinic_flow'],
+        );
+
+    await tester.pumpWidget(
+      GetMaterialApp(
+        theme: AppTheme.lightTheme,
+        home: const Scaffold(body: Center(child: Text('launch'))),
+        getPages: [
+          GetPage(
+            name: AppRoutes.nearbyDoctors,
+            page: () => const NearbyDoctorsScreen(),
+          ),
+        ],
+      ),
+    );
+    Get.toNamed(
+      AppRoutes.nearbyDoctors,
+      arguments: {
+        'mode': 'register',
+        'displayName': 'Dr. New',
+        'mobile': '9876543212',
+        'role': UserModel.roleDoctor,
+      },
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // route transition
+    await tester.pump(const Duration(milliseconds: 100)); // mock places load
+    await tester.pump(const Duration(milliseconds: 600)); // card fade-in
+
+    // The card is shown (nearby data displays) but its Select & Continue
+    // button is disabled because the place is already registered.
+    expect(find.text('Select Your Clinic'), findsOneWidget);
+    expect(find.text('City Clinic'), findsOneWidget);
+    final button = tester.widget<ElevatedButton>(
+      find.ancestor(
+        of: find.text('Select & Continue'),
+        matching: find.bySubtype<ElevatedButton>(),
+      ),
+    );
+    expect(button.onPressed, isNull);
+    expect(find.text('Already registered as a doctor'), findsOneWidget);
   });
 }

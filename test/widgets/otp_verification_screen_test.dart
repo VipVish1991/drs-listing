@@ -28,30 +28,11 @@ class _TestAuthController extends AuthController {
 /// Counts `register()` invocations and can hold the call in-flight via
 /// [gate] so the test can fire a second verification while the first is
 /// still pending (the exact race the re-entry guard is for).
-///
-/// Mimics the SERVER-verified OTP contract: [requestOtp] returns the demo
-/// code and [verifyOtp] accepts only the code that was issued.
 class _FakeAuthService extends AuthService {
   _FakeAuthService() : super.testing();
 
   int registerCalls = 0;
-  int requestOtpCalls = 0;
   Completer<UserModel>? gate;
-
-  /// The code [requestOtp] issues (demo mode — the server returns it so
-  /// the app can display it).
-  String serverOtp = '123456';
-
-  @override
-  Future<String?> requestOtp(String mobile) async {
-    requestOtpCalls++;
-    return serverOtp;
-  }
-
-  @override
-  Future<bool> verifyOtp(String mobile, String otp) async {
-    return otp == serverOtp;
-  }
 
   @override
   Future<UserModel> register(
@@ -73,9 +54,14 @@ const String _baseRoute = '/otp-system-back-base';
 /// Pumps the OTP screen (patient registration, no pre-selected doctor)
 /// with an injectable [AuthService] fake and a registered `/home` route
 /// so the post-verification navigation resolves.
+///
+/// [otpGenerator] injects a fixed client-side code so tests can assert
+/// toast + local verification deterministically. The OTP send delay is
+/// zeroed so the toast shows immediately instead of after 3s.
 Future<void> _pumpOtpScreen(
   WidgetTester tester, {
   required AuthService authService,
+  String Function()? otpGenerator,
 }) async {
   await tester.pumpWidget(
     GetMaterialApp(
@@ -91,6 +77,8 @@ Future<void> _pumpOtpScreen(
         mobile: '9876543210',
         role: UserModel.rolePatient,
         authService: authService,
+        otpGenerator: otpGenerator,
+        otpSendDelay: Duration.zero,
       ),
     ),
   );
@@ -101,13 +89,29 @@ Future<void> _pumpOtpScreen(
   await tester.pump(const Duration(milliseconds: 1500));
 }
 
-/// Disposes the OTP screen and advances 1s so the resend-countdown
-/// `Future.doWhile` chain (one 1s one-shot timer at a time) sees the
-/// screen is unmounted and terminates — otherwise the test framework
-/// fails on a still-pending timer.
+/// Disposes the OTP screen and flushes pending timers so the test
+/// framework doesn't fail on a still-pending timer:
+///  (a) the demo-OTP toast's 6s snackbar display timer must expire and its
+///      hide animation finish WHILE the overlay is still mounted (pumping
+///      it after dispose leaks a ticker), and
+///  (b) the resend-countdown `Future.doWhile` chain (one 1s one-shot
+///      timer at a time) must see the screen unmounted and terminate.
+/// Fixed pumps only — never pumpAndSettle while the OTP screen is
+/// mounted (the pin field's blinking cursor animates forever).
 Future<void> _flushResendTimer(WidgetTester tester) async {
+  // Let the toast time out and hide while mounted.
+  await tester.pump(const Duration(seconds: 7));
+  await tester.pump(const Duration(milliseconds: 500));
+  await tester.pump(const Duration(milliseconds: 500));
+  // Force-close any snackbar still on screen (its reverse animation may
+  // not have been driven to completion) while the overlay is alive.
+  Get.closeAllSnackbars();
+  await tester.pump(const Duration(milliseconds: 500));
+  await tester.pump(const Duration(milliseconds: 500));
+  // Now dispose and let the resend chain terminate.
   await tester.pumpWidget(const SizedBox.shrink());
   await tester.pump(const Duration(seconds: 1));
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -122,24 +126,29 @@ void main() {
 
   group('OtpVerificationScreen verification', () {
     testWidgets(
-      'server-minted OTP is pre-filled and verifies with exactly one '
-      'register() call',
+      'client-generated OTP is toasted (not pre-filled) and verifies '
+      'locally with exactly one register() call',
       (tester) async {
         final fake = _FakeAuthService();
 
-        await _pumpOtpScreen(tester, authService: fake);
+        await _pumpOtpScreen(
+          tester,
+          authService: fake,
+          otpGenerator: () => '1234',
+        );
 
-        // The server-minted OTP '123456' was fetched and pre-filled → the
-        // pill shows it (demo mode) and the pin boxes render its digits.
-        expect(find.text('Demo OTP: 123456'), findsOneWidget);
-        expect(find.text('1'), findsAtLeastNWidgets(1));
+        // The toast shows the code (demo mode) but the pin field is NOT
+        // pre-filled — the user must type the code manually.
+        expect(find.text('Demo OTP: 1234'), findsOneWidget);
         expect(find.text('Verify & Continue'), findsOneWidget);
-        expect(fake.requestOtpCalls, 1);
+        expect(find.text('1'), findsNothing);
 
-        await tester.tap(find.text('Verify & Continue'));
+        // User reads the code from the toast and types it in manually —
+        // completing the 4th digit auto-submits verification.
+        await tester.enterText(find.byType(PinCodeTextField), '1234');
         await tester.pumpAndSettle();
 
-        // The server accepted the code → exactly one register() ran.
+        // The code matched locally → exactly one register() ran.
         expect(fake.registerCalls, 1);
         // Patient registration lands on the patient home.
         expect(find.text('PATIENT HOME'), findsOneWidget);
@@ -157,7 +166,11 @@ void main() {
       final gate = Completer<UserModel>();
       fake.gate = gate;
 
-      await _pumpOtpScreen(tester, authService: fake);
+      await _pumpOtpScreen(
+        tester,
+        authService: fake,
+        otpGenerator: () => '1234',
+      );
 
       // Before verifying, back navigation is enabled.
       expect(
@@ -165,7 +178,10 @@ void main() {
         isNotNull,
       );
 
-      await tester.tap(find.text('Verify & Continue')); // in-flight
+      // User types the code from the toast manually — completing the 4th
+      // digit auto-submits verification (held in-flight by the gate).
+      await tester.enterText(find.byType(PinCodeTextField), '1234');
+      await tester.pump();
       await tester.pump();
 
       // While the registration is pending, back is disabled so the user
@@ -205,6 +221,8 @@ void main() {
                 mobile: '9876543210',
                 role: UserModel.rolePatient,
                 authService: fake,
+                otpGenerator: () => '1234',
+                otpSendDelay: Duration.zero,
               ),
             ),
             GetPage(
@@ -225,8 +243,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1500));
       expect(find.byType(OtpVerificationScreen), findsOneWidget);
 
-      // Start verification (held in-flight by the gate).
-      await tester.tap(find.text('Verify & Continue'));
+      // User types the code from the toast manually — completing the 4th
+      // digit auto-submits verification (held in-flight by the gate).
+      await tester.enterText(find.byType(PinCodeTextField), '1234');
+      await tester.pump();
       await tester.pump();
 
       // Simulate the Android system back button → must NOT pop while the
@@ -245,23 +265,22 @@ void main() {
       await _flushResendTimer(tester);
     });
 
-    testWidgets('non-server-issued OTP is rejected without calling '
-        'register()', (tester) async {
+    testWidgets('non-matching OTP is rejected without calling register()', (
+      tester,
+    ) async {
       final fake = _FakeAuthService();
 
-      await _pumpOtpScreen(tester, authService: fake);
+      await _pumpOtpScreen(
+        tester,
+        authService: fake,
+        otpGenerator: () => '1234',
+      );
 
-      // Simulate the user replacing the pre-filled code with a WRONG one
-      // (the fake's verify_otp accepts only the issued '123456'). The
-      // screen shares its private controller with the PinCodeTextField,
-      // so writing through the widget's controller is equivalent to
-      // typing.
-      final pinField =
-          tester.widget<PinCodeTextField>(find.byType(PinCodeTextField));
-      pinField.controller?.text = '222222';
+      // The user types a WRONG code (local verification accepts only the
+      // generated '1234'). Completing the 4th digit auto-submits → the
+      // mismatch is rejected without ever calling register().
+      await tester.enterText(find.byType(PinCodeTextField), '2222');
       await tester.pump();
-
-      await tester.tap(find.text('Verify & Continue'));
       await tester.pump();
 
       // Wrong OTP → error shown, and register() is never reached.
@@ -280,11 +299,15 @@ void main() {
       (tester) async {
         final fake = _FakeAuthService();
 
-        await _pumpOtpScreen(tester, authService: fake);
+        await _pumpOtpScreen(
+          tester,
+          authService: fake,
+          otpGenerator: () => '1234',
+        );
 
-        // Replace the pre-filled code with a wrong 6-digit one (= complete
+        // Replace the pre-filled code with a wrong 4-digit one (= complete
         // → auto-submit) → rejected without registering.
-        await tester.enterText(find.byType(PinCodeTextField), '222222');
+        await tester.enterText(find.byType(PinCodeTextField), '2222');
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
 
@@ -303,17 +326,23 @@ void main() {
         final gate = Completer<UserModel>();
         fake.gate = gate;
 
-        await _pumpOtpScreen(tester, authService: fake);
+        await _pumpOtpScreen(
+          tester,
+          authService: fake,
+          otpGenerator: () => '1234',
+        );
 
-        final verifyButton = find.text('Verify & Continue');
-        await tester.tap(verifyButton); // 1st call → register() in-flight
+        // Typing the full code auto-submits (register() now in-flight,
+        // held by the gate). A button tap landing before the rebuild would
+        // otherwise fire _verifyOtp a second time — the `if (_isLoading)
+        // return;` guard swallows it.
+        await tester.enterText(find.byType(PinCodeTextField), '1234');
+        // No pump between enterText and the tap: the button's captured
+        // onPressed still points at _verifyOtp (the loading rebuild that
+        // disables it hasn't happened yet).
+        await tester.tap(find.text('Verify & Continue'));
 
-        // Tap again BEFORE any rebuild. The button's captured onPressed
-        // still points at _verifyOtp, so without the `if (_isLoading)
-        // return;` guard this would fire register() a second time.
-        await tester.tap(verifyButton);
-
-        // Guard swallowed the second invocation.
+        // Guard swallowed the second invocation → still exactly one.
         expect(fake.registerCalls, 1);
 
         // Prove the registration is genuinely still in flight: the button

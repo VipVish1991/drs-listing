@@ -37,6 +37,13 @@ class NearbyDoctorsScreen extends StatefulWidget {
   @visibleForTesting
   static Future<bool> Function()? gpsCheckOverride;
 
+  /// Test hook — replaces the real SupabaseService for the
+  /// "already registered as a doctor" check so widget tests can
+  /// deterministically simulate a previously-registered mobile (or a
+  /// fresh one) without hitting the live backend.
+  @visibleForTesting
+  static SupabaseService Function()? supabaseOverride;
+
   @override
   State<NearbyDoctorsScreen> createState() => _NearbyDoctorsScreenState();
 }
@@ -88,6 +95,13 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
   /// the card buttons + notice update as soon as the check lands.
   final RxBool _registrationBlocked = false.obs;
 
+  /// Google Place IDs already registered in the Supabase `doctors` table.
+  /// In registration mode, any nearby-Google-result card whose place_id
+  /// is in this set is disabled — that clinic/hospital/doctor is already
+  /// registered and can't be claimed twice. Reactive so cards update as
+  /// soon as the list lands.
+  final RxSet<String> _registeredDoctorPlaceIds = <String>{}.obs;
+
   /// Debounce timer for text search — waits 400ms after the user stops
   /// typing before firing the API call.
   Timer? _searchDebounce;
@@ -116,6 +130,7 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
     _readArgs();
     if (_registrationMode) {
       _checkDoctorAlreadyRegistered();
+      _loadRegisteredDoctorPlaceIds();
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadNearbyPlaces());
   }
@@ -127,11 +142,29 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
   /// uninitialized Supabase) never blocks a legitimate registration.
   Future<void> _checkDoctorAlreadyRegistered() async {
     try {
-      final user = await SupabaseService().getUserByMobile(_regMobile);
+      final supabase =
+          NearbyDoctorsScreen.supabaseOverride?.call() ?? SupabaseService();
+      final user = await supabase.getUserByMobile(_regMobile);
       if (!mounted) return;
       _registrationBlocked.value = user?['role'] == UserModel.roleDoctor;
     } catch (_) {
       // Fail open: leave the button enabled.
+    }
+  }
+
+  /// In registration mode, fetch every Google Place ID already present in
+  /// the Supabase `doctors` table. Any nearby result whose place_id
+  /// matches is already registered and its card is disabled. Fails open —
+  /// a fetch error never blocks a legitimate registration.
+  Future<void> _loadRegisteredDoctorPlaceIds() async {
+    try {
+      final supabase =
+          NearbyDoctorsScreen.supabaseOverride?.call() ?? SupabaseService();
+      final ids = await supabase.getRegisteredDoctorPlaceIds();
+      if (!mounted) return;
+      _registeredDoctorPlaceIds.assignAll(ids);
+    } catch (_) {
+      // Fail open: leave all cards enabled.
     }
   }
 
@@ -726,7 +759,11 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
           bodyColor: bodyColor,
           isSelected: isSelected,
           isRegistrationMode: _registrationMode,
-          registrationBlocked: _registrationBlocked.value,
+          // Disabled when the mobile is already a registered doctor OR
+          // when this exact clinic/hospital/doctor is already registered
+          // in the doctors table (place_id match against Google results).
+          registrationBlocked: _registrationBlocked.value ||
+              _registeredDoctorPlaceIds.contains(place.placeId),
           onSelect: () => selectedDoctor.value = place,
           onConnect: () => _onConnect(place),
         );

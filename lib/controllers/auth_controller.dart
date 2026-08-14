@@ -15,6 +15,8 @@ import '../controllers/doctor_controller.dart';
 import '../controllers/voice_controller.dart';
 import '../services/local_storage_service.dart';
 import '../services/notification_service.dart';
+import '../utils/otp_generator.dart';
+import '../utils/snackbar_helpers.dart';
 
 class AuthController extends GetxController {
   final AuthService _authService = AuthService();
@@ -42,6 +44,17 @@ class AuthController extends GetxController {
     try {
       final user = await _authService.getCurrentUser();
       if (user != null) {
+        // Admin-deactivated account (is_active = false): never restore a
+        // session — wipe it and send the user back to login with the
+        // support message instead of letting them in.
+        if (!user.isActive) {
+          debugPrint('🚫 Inactive account blocked on warm start');
+          await _authService.logout();
+          currentUser.value = null;
+          isLoggedIn.value = false;
+          showErrorSnackbar(AuthService.inactiveMessage);
+          return;
+        }
         currentUser.value = user;
         isLoggedIn.value = true;
         // Register this device for push notifications on a warm start.
@@ -456,12 +469,10 @@ class AuthController extends GetxController {
   Future<void> showConnectedDialog(DoctorModel doctor) async {
     if (Get.context == null) return;
 
-    // Server-verified OTP (no universal 1111). A fresh code is minted via
-    // request_otp (demo mode — the server returns it so the dialog can
-    // display it) and checked via verify_otp before connecting. Null until
-    // the fetch resolves; the UI shows a 'Requesting code…' hint meanwhile.
-    String? serverOtp;
-    final mobile = currentUser.value?.mobile ?? '';
+    // Client-side OTP (no universal 1111). A fresh random 4-digit code is
+    // generated in-app (demo mode — shown in a top toast) and verified
+    // locally before connecting.
+    String? generatedOtp;
     final otpController = TextEditingController();
     final focusNode = FocusNode();
     final otpError = ValueNotifier<String?>('');
@@ -507,15 +518,22 @@ class AuthController extends GetxController {
             });
           }
 
-          // ── Mint a fresh server OTP (best-effort; the UI degrades to
-          //     a Resend hint on failure instead of blocking the dialog) ──
-          Future<void> loadOtp() async {
-            serverOtp = await _supabase.requestOtp(mobile);
-            if (serverOtp != null) {
-              otpController.text = serverOtp!;
-              otpValue.value = serverOtp!;
-            }
-            setDialogState(() {});
+          // ── Generate a fresh client-side OTP (NOT pre-filled — the
+          //     user types it from the toast) ──
+          void loadOtp() {
+            generatedOtp = generateDemoOtp();
+            // "Send" the code after a short delay so it feels like a real
+            // SMS arriving. Deferred to after the frame — this runs during
+            // the dialog builder's first build, and Get.snackbar inserts
+            // an overlay entry / setDialogState marks the Overlay dirty
+            // (setState during build) which would throw "setState() or
+            // markNeedsBuild() called during build".
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              Timer(const Duration(seconds: 3), () {
+                showDemoOtpToast(generatedOtp!);
+              });
+              setDialogState(() {});
+            });
           }
 
           // Auto-start the countdown when the dialog first opens
@@ -792,9 +810,7 @@ class AuthController extends GetxController {
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              serverOtp == null
-                                  ? 'Requesting code…'
-                                  : 'Demo OTP: $serverOtp',
+                              'Demo OTP: $generatedOtp',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: AppColors.accent.withAlpha(200),
@@ -813,7 +829,6 @@ class AuthController extends GetxController {
                                       otpController.text = '';
                                       otpValue.value = '';
                                       otpError.value = '';
-                                      serverOtp = null;
                                       loadOtp();
                                       Get.snackbar(
                                         'Code Resent',
@@ -899,20 +914,18 @@ class AuthController extends GetxController {
                                       FocusScope.of(context).unfocus();
 
                                       final otp = otpValue.value;
-                                      if (otp.length != 6 ||
-                                          !RegExp(r'^\d{6}$').hasMatch(otp)) {
+                                      if (otp.length != 4 ||
+                                          !RegExp(r'^\d{4}$').hasMatch(otp)) {
                                         otpError.value =
                                             'Please enter a valid '
-                                            '6-digit code';
+                                            '4-digit code';
                                         return;
                                       }
 
-                                      // Server-side verification — no
-                                      // universal code. Failure (wrong /
-                                      // expired / too many attempts /
-                                      // network) blocks the connect.
-                                      final verified = await _supabase
-                                          .verifyOtp(mobile, otp);
+                                      // Client-side verification — the
+                                      // entered code must match the code
+                                      // generated for this dialog.
+                                      final verified = otp == generatedOtp;
                                       if (!verified) {
                                         otpError.value =
                                             'Invalid code. '

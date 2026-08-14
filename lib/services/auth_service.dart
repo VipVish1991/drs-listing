@@ -18,17 +18,8 @@ class AuthException implements Exception {
 class AuthService {
   static final AuthService _instance = AuthService._internal();
   factory AuthService() => _instance;
-  AuthService._internal();
 
-  /// Mint a fresh OTP for [mobile] from the server (see
-  /// [SupabaseService.requestOtp]). DEMO MODE: returns the code so the
-  /// UI can display it. Returns null on failure.
-  Future<String?> requestOtp(String mobile) => _supabase.requestOtp(mobile);
-
-  /// Verify [otp] for [mobile] against the server (see
-  /// [SupabaseService.verifyOtp]). Returns true only on server acceptance.
-  Future<bool> verifyOtp(String mobile, String otp) =>
-      _supabase.verifyOtp(mobile, otp);
+  AuthService._internal() : _supabase = SupabaseService();
 
   /// Creates an unshared instance for subclassing in tests.
   ///
@@ -37,17 +28,32 @@ class AuthService {
   /// extend this class and call `super.testing()`. No platform channels
   /// are touched at construction, so it is safe to build in widget tests.
   @visibleForTesting
-  AuthService.testing();
+  AuthService.testing({SupabaseService? supabase})
+      : _supabase = supabase ?? SupabaseService.testing();
 
   final _storage = const FlutterSecureStorage();
-  final _supabase = SupabaseService();
+  final SupabaseService _supabase;
 
   static const _userKey = 'current_user';
+
+  /// Shown when an account has been deactivated by the admin (is_active
+  /// = false). Used by both the login gate below and the warm-start
+  /// session check in AuthController.
+  static const String inactiveMessage =
+      'Your account is inactive. Please contact our support team.';
 
   Future<UserModel?> login(String mobile) async {
     try {
       final userData = await _supabase.getUserByMobile(mobile);
       if (userData == null) return null;
+      // Admin-deactivated account: refuse login before any session is
+      // created — the user must contact support to be re-enabled.
+      if (userData['is_active'] == false) {
+        throw AuthException(
+          inactiveMessage,
+          code: 'account_inactive',
+        );
+      }
       final user = UserModel.fromJson(userData);
       // Persisting locally is best-effort — a secure-storage hiccup must
       // NOT block login (it used to bubble up as a misleading
@@ -58,6 +64,10 @@ class AuthService {
         debugPrint('⚠️ Failed to persist user locally (non-fatal): $e');
       }
       return user;
+    } on AuthException {
+      // Already a real auth failure (e.g. account_inactive) — surface it
+      // as-is instead of masking it as a network error.
+      rethrow;
     } catch (e) {
       throw AuthException(
         'Connection error. Please check your internet and try again.',
