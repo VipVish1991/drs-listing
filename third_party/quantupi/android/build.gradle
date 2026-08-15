@@ -1,0 +1,28 @@
+group 'com.example.quantupi'
+version '1.0'
+
+// Vendored locally (third_party/quantupi). The upstream buildscript pinned
+// AGP 7.1.2, which is incompatible with the app's Gradle 8 + AGP 8 toolchain —
+// the classpath is supplied by the root android/settings.gradle.kts instead.
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.example.quantupi'
+    compileSdkVersion 31
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    defaultConfig {
+        minSdkVersion 16
+    }
+}

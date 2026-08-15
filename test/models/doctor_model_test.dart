@@ -125,7 +125,7 @@ void main() {
         final restored = DoctorModel.fromJson(json);
         expect(restored.upiId, 'clinic@okhdfcbank');
 
-        // Absent key → null (booking flow falls back to the default VPA).
+        // Absent key → null (booking flow falls back to pay-at-clinic).
         final without = DoctorModel.fromJson({'place_id': 'x', 'name': 'Y'});
         expect(without.upiId, isNull);
       });

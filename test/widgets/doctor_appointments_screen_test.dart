@@ -949,6 +949,142 @@ void main() {
   );
 
   testWidgets(
+    'Mark Completed is disabled while the fee is Pending and enabled once paid',
+    (tester) async {
+      final controller = await _pumpScreen(
+        tester,
+        [
+          appointmentBasic(
+            appointmentId: 'APT_PAY_GATE',
+            patientName: 'Gate Patient',
+            appointmentDate: _todayKey(),
+            appointmentTime: '10:00 AM',
+            status: AppointmentStatus.upcoming,
+            doctorPlaceId: 'place_dash_1',
+            consultationType: 'tele',
+          ),
+        ],
+        payments: {
+          'APT_PAY_GATE': paymentFor(appointmentId: 'APT_PAY_GATE'),
+        },
+      );
+
+      // The button renders but is inert while the fee is unpaid — tapping
+      // it must NOT open the complete flow.
+      expect(find.text('Mark Completed'), findsOneWidget);
+      await tester.tap(find.text('Mark Completed'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing,
+          reason: 'an unpaid appointment must not be completable');
+      expect(find.text('Complete Appointment'), findsNothing);
+
+      // The clinic submits the payment status (Mark Paid → map reloads
+      // with status Paid) — the same card now completes.
+      controller.paymentsByAppointment.value = {
+        'APT_PAY_GATE': paymentFor(
+          appointmentId: 'APT_PAY_GATE',
+          paymentStatus: 'Paid',
+        ),
+      };
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      await tester.tap(find.text('Mark Completed'));
+      await tester.pumpAndSettle();
+      expect(find.text('Complete Appointment'), findsOneWidget);
+
+      // Close the dialog cleanly (completes without a prescription).
+      await tester.tap(find.text('Complete without Prescription'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      expect(controller.updatedStatuses, [AppointmentStatus.completed]);
+
+      await _settleAnimations(tester);
+    },
+  );
+
+  testWidgets(
+    'chained flow: Mark Paid → card flips to Paid → Mark Completed enabled → '
+    'complete', (tester) async {
+      final controller = await _pumpScreen(
+        tester,
+        [
+          appointmentBasic(
+            appointmentId: 'APT_CHAIN',
+            patientName: 'Chain Patient',
+            appointmentDate: _todayKey(),
+            appointmentTime: '10:00 AM',
+            status: AppointmentStatus.upcoming,
+            doctorPlaceId: 'place_dash_1',
+            consultationType: 'clinic',
+          ),
+        ],
+        payments: {
+          'APT_CHAIN': paymentFor(appointmentId: 'APT_CHAIN', amount: 600),
+        },
+      );
+
+      // Step 1 — the fee is Pending: settle actions show and Mark
+      // Completed is inert.
+      expect(find.text('Pending'), findsOneWidget);
+      expect(find.text('Mark Paid'), findsOneWidget);
+      expect(find.text('Refund'), findsOneWidget);
+      await tester.tap(find.text('Mark Completed'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing,
+          reason: 'an unpaid appointment must not be completable');
+
+      // Step 2 — the clinic settles the fee: Mark Paid → confirm dialog.
+      await tester.tap(find.text('Mark Paid'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mark Payment Paid'), findsOneWidget);
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Mark Paid'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(controller.markedPayments, [('APT_CHAIN', 'Paid')]);
+      expect(find.byType(Dialog), findsNothing);
+
+      // Step 3 — the controller reloads the payment map (markPaymentStatus
+      // → loadPayments): chip flips to Paid, settle actions disappear.
+      controller.paymentsByAppointment.value = {
+        'APT_CHAIN': paymentFor(
+          appointmentId: 'APT_CHAIN',
+          amount: 600,
+          paymentStatus: 'Paid',
+        ),
+      };
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Paid'), findsWidgets,
+          reason: 'payment chip must flip to Paid after the reload');
+      expect(find.text('Pending'), findsNothing);
+      expect(find.text('Mark Paid'), findsNothing);
+      expect(find.text('Refund'), findsNothing);
+
+      // Let the 'Payment marked as Paid' success snackbar auto-dismiss
+      // before the completion step — a lingering overlay snackbar would
+      // intercept the taps below (it sits above the Navigator in the
+      // overlay).
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      // Step 4 — the settled fee unlocks Mark Completed; completing flips
+      // the appointment to Completed.
+      await tester.tap(find.text('Mark Completed'));
+      await tester.pumpAndSettle();
+      expect(find.text('Complete Appointment'), findsOneWidget);
+      await tester.tap(find.text('Complete without Prescription'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      expect(controller.updatedStatuses, [AppointmentStatus.completed]);
+
+      await _settleAnimations(tester);
+    },
+  );
+
+  testWidgets(
     'details sheet shows the fee/payment card for an appointment with a payment',
     (tester) async {
       await _pumpScreen(
@@ -1205,6 +1341,87 @@ void main() {
   });
 
   testWidgets(
+    'chained flow: Refund → card flips to Refunded → Mark Completed stays '
+    'enabled → complete', (tester) async {
+      final controller = await _pumpScreen(
+        tester,
+        [
+          appointmentBasic(
+            appointmentId: 'APT_REFUND_CHAIN',
+            patientName: 'Refund Chain Patient',
+            appointmentDate: _todayKey(),
+            appointmentTime: '10:00 AM',
+            status: AppointmentStatus.upcoming,
+            doctorPlaceId: 'place_dash_1',
+            consultationType: 'clinic',
+          ),
+        ],
+        payments: {
+          'APT_REFUND_CHAIN': paymentFor(
+            appointmentId: 'APT_REFUND_CHAIN',
+            amount: 500,
+          ),
+        },
+      );
+
+      // Step 1 — the fee is Pending: settle actions show and Mark
+      // Completed is inert.
+      expect(find.text('Pending'), findsOneWidget);
+      expect(find.text('Refund'), findsOneWidget);
+      await tester.tap(find.text('Mark Completed'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing,
+          reason: 'an unpaid appointment must not be completable');
+
+      // Step 2 — the clinic refunds the fee: Refund → confirm dialog.
+      await tester.tap(find.text('Refund'));
+      await tester.pumpAndSettle();
+      expect(find.text('Refund Payment'), findsOneWidget);
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Refund'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(controller.markedPayments, [('APT_REFUND_CHAIN', 'Refunded')]);
+      expect(find.byType(Dialog), findsNothing);
+
+      // Step 3 — the controller reloads the payment map (markPaymentStatus
+      // → loadPayments): chip flips to Refunded, settle actions disappear.
+      controller.paymentsByAppointment.value = {
+        'APT_REFUND_CHAIN': paymentFor(
+          appointmentId: 'APT_REFUND_CHAIN',
+          amount: 500,
+          paymentStatus: 'Refunded',
+        ),
+      };
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Refunded'), findsWidgets,
+          reason: 'payment chip must flip to Refunded after the reload');
+      expect(find.text('Pending'), findsNothing);
+      expect(find.text('Mark Paid'), findsNothing);
+      expect(find.text('Refund'), findsNothing);
+
+      // Let the 'Payment marked as Refunded' success snackbar auto-dismiss
+      // before the completion step (a lingering overlay snackbar would
+      // intercept the taps below).
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      // Step 4 — a settled (refunded) fee does NOT re-lock Mark Completed:
+      // the button stays enabled and completes the appointment.
+      await tester.tap(find.text('Mark Completed'));
+      await tester.pumpAndSettle();
+      expect(find.text('Complete Appointment'), findsOneWidget);
+      await tester.tap(find.text('Complete without Prescription'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      expect(controller.updatedStatuses, [AppointmentStatus.completed]);
+
+      await _settleAnimations(tester);
+    },
+  );
+
+  testWidgets(
     'Mark Paid confirm shows a loading spinner while the update runs',
     (tester) async {
       final controller = await _pumpScreen(
@@ -1335,10 +1552,11 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('already-Paid payment shows an informational chip, no actions', (
-    tester,
-  ) async {
-    await _pumpScreen(
+  testWidgets('complete flow: an online Paid payment (from UPI booking) '
+      'enables Mark Completed and completes the appointment', (tester) async {
+    // The payment row exactly as the patient-side UPI booking flow records
+    // it: method 'online', status 'Paid', transaction id + doctor VPA.
+    final controller = await _pumpScreen(
       tester,
       [
         appointmentBasic(
@@ -1348,6 +1566,7 @@ void main() {
           appointmentTime: '10:00 AM',
           status: AppointmentStatus.upcoming,
           doctorPlaceId: 'place_dash_1',
+          consultationType: 'video',
         ),
       ],
       payments: {
@@ -1360,11 +1579,77 @@ void main() {
       },
     );
 
+    // The card shows the settled fee as an informational chip.
     expect(find.text('Payment · ₹800'), findsOneWidget);
     expect(find.text('Paid'), findsOneWidget);
-    // No settle actions for a settled payment.
+    // No settle actions for an already-settled payment.
     expect(find.text('Mark Paid'), findsNothing);
     expect(find.text('Refund'), findsNothing);
+
+    // The fee was paid up-front, so Mark Completed is ENABLED (not the
+    // greyed-out state a Pending payment would force).
+    expect(find.text('Mark Completed'), findsOneWidget);
+    await tester.tap(find.text('Mark Completed'));
+    await tester.pumpAndSettle();
+    expect(find.text('Complete Appointment'), findsOneWidget);
+
+    // Completing without a prescription flips the appointment to Completed.
+    await tester.tap(find.text('Complete without Prescription'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsNothing);
+    expect(controller.updatedStatuses, [AppointmentStatus.completed]);
+
+    await _settleAnimations(tester);
+  });
+
+  testWidgets('complete flow: a Refunded payment also keeps Mark Completed '
+      'enabled and completes the appointment', (tester) async {
+    // A payment row the clinic already refunded (stored status 'Refunded')
+    // — like Paid, a settled payment must NOT re-lock completion (only
+    // Pending blocks it).
+    final controller = await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_REFUNDED',
+          patientName: 'Refunded Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+          consultationType: 'clinic',
+        ),
+      ],
+      payments: {
+        'APT_REFUNDED': paymentFor(
+          appointmentId: 'APT_REFUNDED',
+          paymentStatus: 'Refunded',
+          amount: 500,
+        ),
+      },
+    );
+
+    // The card shows the settled fee as an informational chip.
+    expect(find.text('Payment · ₹500'), findsOneWidget);
+    expect(find.text('Refunded'), findsOneWidget);
+    // No settle actions for an already-settled payment.
+    expect(find.text('Mark Paid'), findsNothing);
+    expect(find.text('Refund'), findsNothing);
+
+    // The fee is settled, so Mark Completed is ENABLED (not the
+    // greyed-out state a Pending payment would force).
+    expect(find.text('Mark Completed'), findsOneWidget);
+    await tester.tap(find.text('Mark Completed'));
+    await tester.pumpAndSettle();
+    expect(find.text('Complete Appointment'), findsOneWidget);
+
+    // Completing without a prescription flips the appointment to Completed.
+    await tester.tap(find.text('Complete without Prescription'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsNothing);
+    expect(controller.updatedStatuses, [AppointmentStatus.completed]);
 
     await _settleAnimations(tester);
   });

@@ -26,7 +26,8 @@ class _TestAuthController extends AuthController {
 }
 
 /// DB doctor row shape — the `doctors` table record that already has
-/// `upi_id` and `unavailable_ranges` set (the doctor saved them earlier).
+/// `upi_id`, `unavailable_ranges` and `experience_years` set (the doctor
+/// saved them earlier).
 final Map<String, dynamic> _dbDoctorJson = {
   'place_id': 'place_upi_test',
   'name': 'Dr. UPI Test',
@@ -190,12 +191,12 @@ GROQ_API_KEY=test_groq_key
   }
 
   group('navigateToRoleBasedHome preserves doctor-set fields on re-login', () {
-    testWidgets('enriched doctor keeps the saved UPI ID (primary path)', (
-      tester,
-    ) async {
+    testWidgets('enriched doctor keeps the saved availability (primary path)',
+        (tester) async {
       await pumpNavigator(tester);
 
-      // A doctor user whose clinic already has upi_id saved in the DB.
+      // A doctor user whose clinic already has doctor-set fields saved in
+      // the DB (experience_years, unavailable_ranges).
       auth.currentUser.value = userDoctor(
         id: 'user_doctor_upi',
         mobile: '9876543211',
@@ -226,12 +227,14 @@ GROQ_API_KEY=test_groq_key
       expect(body['experience_years'], 12);
     });
 
-    testWidgets('fallback path (getDoctorsByUserId) also preserves the UPI ID',
+    testWidgets(
+        'fallback path (getDoctorsByUserId) also preserves doctor-set fields',
         (tester) async {
       await pumpNavigator(tester);
 
       // No doctorPlaceId on the user → the login flow falls back to
-      // getDoctorsByUserId, which returns the DB row with upi_id.
+      // getDoctorsByUserId, which returns the DB row with the doctor-set
+      // fields.
       auth.currentUser.value = userDoctor(
         id: 'user_doctor_upi',
         mobile: '9876543211',

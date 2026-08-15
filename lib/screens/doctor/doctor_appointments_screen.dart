@@ -883,6 +883,13 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
                 payment != null &&
                 payment.paymentMethod == 'offline' &&
                 payment.paymentStatus == 'Pending';
+            // "Mark Completed" is gated on the consultation fee being
+            // settled: while the payment is still Pending (unpaid), the
+            // button renders disabled until the clinic marks it Paid (or
+            // Refunded) — the doctor must not complete a booking that
+            // hasn't been paid for.
+            final paymentPending =
+                payment != null && payment.paymentStatus == 'Pending';
 
             return _ModernAppointmentCard(
               appointment: a,
@@ -903,7 +910,9 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
               onTap: () => _showAppointmentDetails(a),
               onCancel: () => _handleCancel(a),
               onConfirm: isPending ? () => _handleConfirm(a) : null,
-              onComplete: () => _handleComplete(a),
+              onComplete: paymentPending
+                  ? null
+                  : () => _handleComplete(a),
               onVideoCall: a.isVideoConsultation
                   ? () => _openVideoCall(a)
                   : null,
@@ -949,7 +958,10 @@ class _ModernAppointmentCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onCancel;
   final VoidCallback? onConfirm;
-  final VoidCallback onComplete;
+
+  /// Null while the consultation fee is still Pending (unpaid) — the
+  /// button then renders disabled instead of opening the complete flow.
+  final VoidCallback? onComplete;
 
   /// Opens the Google Meet video-call sheet (video consultations only).
   final VoidCallback? onVideoCall;
@@ -973,7 +985,7 @@ class _ModernAppointmentCard extends StatelessWidget {
     required this.onTap,
     required this.onCancel,
     this.onConfirm,
-    required this.onComplete,
+    this.onComplete,
     this.onVideoCall,
     this.payment,
     this.onMarkPaid,
@@ -1059,6 +1071,7 @@ class _ModernAppointmentCard extends StatelessWidget {
                           color: AppColors.success,
                           onTap: onComplete,
                           isPrimary: true,
+                          enabled: onComplete != null,
                         ),
                     ],
                   ),
@@ -1332,8 +1345,12 @@ class _ModernActionBtn extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final bool isPrimary;
+
+  /// When false the pill renders greyed-out and inert — used for the
+  /// "Mark Completed" action while a fee payment is still Pending.
+  final bool enabled;
 
   const _ModernActionBtn({
     required this.label,
@@ -1341,29 +1358,42 @@ class _ModernActionBtn extends StatelessWidget {
     required this.color,
     required this.onTap,
     this.isPrimary = false,
+    this.enabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Disabled: flat grey pill, muted text, no tap handler.
+    final Color bg = enabled
+        ? (isPrimary ? color : color.withAlpha(15))
+        : AppColors.textCaption.withAlpha(14);
+    final Color fg = enabled
+        ? (isPrimary ? Colors.white : color)
+        : AppColors.textCaption.withAlpha(140);
     return Material(
-      color: isPrimary ? color : color.withAlpha(15),
+      color: bg,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
+        // A no-op handler while disabled: with a null onTap the InkWell
+        // adds no gesture recognizer, so the tap falls through to the
+        // card's own InkWell beneath and opens the details sheet instead
+        // of doing nothing. This recognizer is the deepest, so it wins
+        // the gesture arena and swallows the tap.
+        onTap: enabled ? onTap : () {},
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 16, color: isPrimary ? Colors.white : color),
+              Icon(icon, size: 16, color: fg),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: isPrimary ? Colors.white : color,
+                  color: fg,
                 ),
               ),
             ],

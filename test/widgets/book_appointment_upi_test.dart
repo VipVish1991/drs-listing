@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
@@ -18,6 +17,7 @@ import 'package:DrsListing/models/doctor_slot_model.dart';
 import 'package:DrsListing/models/payment_model.dart';
 import 'package:DrsListing/routes/app_routes.dart';
 import 'package:DrsListing/screens/appointment/book_appointment_screen.dart';
+import 'package:DrsListing/services/quantupi_payment_service.dart';
 
 import '../helpers/test_data.dart';
 
@@ -89,8 +89,8 @@ class _VideoSlotAppointmentController extends AppointmentController {
   }
 }
 
-/// Stub targets for the booking success navigation (not reached in this
-/// test, but required so the route table is complete).
+/// Stub targets for the booking success navigation (not reached in most
+/// tests, but required so the route table is complete).
 class _HomeStub extends StatelessWidget {
   const _HomeStub();
 
@@ -116,6 +116,11 @@ void main() {
   /// exercise both the "doctor set a UPI" and "doctor hasn't set one"
   /// branches of the merge + pill rendering.
   String? dbUpiId = 'clinic@okhdfcbank';
+
+  /// Fake quantupi responses: each [QuantupiPaymentService.pay] call pops
+  /// the next raw response; an empty queue fails the payment (so a retry
+  /// that was never queued still resolves instead of hanging).
+  final responseQueue = <String>[];
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -183,9 +188,20 @@ void main() {
     );
     // Every test starts with the doctor having set a UPI VPA in the DB.
     dbUpiId = 'clinic@okhdfcbank';
+    responseQueue.clear();
+    // Force the Android path + fake the plugin invocation so the flow runs
+    // on the test host (the real plugin only exists on Android devices).
+    QuantupiPaymentService.forceAndroid = true;
+    QuantupiPaymentService.transactionOverride = (upi) async {
+      return responseQueue.isNotEmpty
+          ? responseQueue.removeAt(0)
+          : 'status=failure';
+    };
   });
 
   tearDown(() {
+    QuantupiPaymentService.transactionOverride = null;
+    QuantupiPaymentService.forceAndroid = null;
     Get.reset();
   });
 
@@ -286,78 +302,60 @@ void main() {
     expect(find.text('Offline Pay'), findsOneWidget);
   });
 
-  testWidgets(
-      'online pay with a submitted UPI outcome never calls bookAppointment',
-      (tester) async {
-    // ── Mock the upi_india platform channel ───────────────────────
-    // The vendored plugin talks to the native side over
-    // 'com.az.upi_india'. Stub both methods: discovery reports one
-    // installed app (Google Pay — using its real package name so the
-    // plugin's verified-apps filter keeps it), and startTransaction
-    // returns the raw UPI callback for a payment that was initiated but
-    // NOT confirmed ('status=submitted').
-    const upiChannel = MethodChannel('com.az.upi_india');
-    // The package-name fallback discovery channel (see MainActivity.kt).
-    // On the test host an unmocked channel never completes, which would
-    // hang getInstalledUpiApps mid-flight — stub it to report no extra apps.
-    const fallbackChannel = MethodChannel('drslisting/upi_fallback');
-    final messenger =
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    final startTxnCalls = <Map<dynamic, dynamic>>[];
-    messenger.setMockMethodCallHandler(upiChannel, (call) async {
-      switch (call.method) {
-        case 'getAllUpiApps':
-          return <Map<dynamic, dynamic>>[
-            {
-              'packageName': 'com.google.android.apps.nbu.paisa.user',
-              'name': 'Google Pay',
-              // 1x1 transparent PNG so the picker's Image.memory renders.
-              'icon': base64Decode(
-                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
-              ),
-            },
-          ];
-        case 'startTransaction':
-          startTxnCalls.add(Map<dynamic, dynamic>.from(call.arguments as Map));
-          return 'txnId=UPI_TEST123&status=submitted&txnRef=APT123';
-      }
-      return null;
-    });
-    messenger.setMockMethodCallHandler(
-      fallbackChannel,
-      (call) async => <Map<dynamic, dynamic>>[],
-    );
-    addTearDown(() {
-      messenger.setMockMethodCallHandler(upiChannel, null);
-      messenger.setMockMethodCallHandler(fallbackChannel, null);
-      // Belt-and-braces: cancel any lingering GetX snackbar timer (the
-      // body already pumps the snackbar's full lifecycle; this guards
-      // against a future default-duration change).
-      Get.closeAllSnackbars();
-    });
+  testWidgets('a confirmed UPI payment books with an online Paid record', (
+    tester,
+  ) async {
+    responseQueue.add('upi://pay?txnid=UPI_OK123&status=success');
 
     await pumpBookingFlow(tester);
     await openPaymentSheet(tester);
 
-    // Choose Online Pay → the UPI app picker sheet opens with the app
-    // the mocked channel reported.
     await tester.tap(find.text('Online Pay (UPI)'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Pay with'), findsOneWidget);
-    expect(find.text('Google Pay'), findsOneWidget);
-
-    // Pick Google Pay → the UPI intent fires and the app reports the
-    // payment as 'submitted' (initiated, NOT confirmed).
-    await tester.tap(find.text('Google Pay'));
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
 
-    // The payment DID reach the UPI layer, with the doctor's own VPA
-    // (merged from the doctors table earlier in the flow).
-    expect(startTxnCalls, hasLength(1));
-    expect(startTxnCalls.single['receiverUpiId'], 'clinic@okhdfcbank');
+    // The success snackbar fires, then the booking proceeds with the
+    // online 'Paid' record carrying the transaction id + doctor VPA.
+    final controller = Get.find<AppointmentController>()
+        as _VideoSlotAppointmentController;
+    expect(controller.bookAppointmentCalls, 1);
+    final payment = controller.lastPayment;
+    expect(payment, isNotNull);
+    expect(payment!.paymentMethod, 'online');
+    expect(payment.paymentStatus, 'Paid');
+    expect(payment.amount, 800);
+    expect(payment.transactionId, 'UPI_OK123');
+    expect(payment.upiId, 'clinic@okhdfcbank');
+
+    // The success dialog appears.
+    await tester.pumpAndSettle();
+    expect(find.text('Appointment Booked!'), findsOneWidget);
+
+    // Close it, then let the post-booking navigation + its delayed
+    // 'open appointment history' timer fire so no timers stay pending.
+    await tester.tap(find.text('View Appointments'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    // Let the success snackbar's auto-dismiss timer fire.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'online pay with a submitted UPI outcome never calls bookAppointment',
+      (tester) async {
+    // The UPI app reports the payment as initiated but NOT confirmed.
+    responseQueue.add('txnid=UPI_SUB&status=submitted');
+
+    await pumpBookingFlow(tester);
+    await openPaymentSheet(tester);
+
+    await tester.tap(find.text('Online Pay (UPI)'));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
 
     // ...but an unconfirmed payment must NEVER book:
     final controller = Get.find<AppointmentController>()
@@ -382,48 +380,15 @@ void main() {
   testWidgets('a declined UPI payment offers Try Again and never books', (
     tester,
   ) async {
-    // startTransaction reports a DECLINED payment (status=failure) — the
+    // Both attempts report a DECLINED payment (status=failure) — the
     // "Payment Failed — UPI risk policy" case from the wild.
-    const upiChannel = MethodChannel('com.az.upi_india');
-    const fallbackChannel = MethodChannel('drslisting/upi_fallback');
-    final messenger =
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    final startTxnCalls = <Map<dynamic, dynamic>>[];
-    messenger.setMockMethodCallHandler(upiChannel, (call) async {
-      switch (call.method) {
-        case 'getAllUpiApps':
-          return <Map<dynamic, dynamic>>[
-            {
-              'packageName': 'net.one97.paytm',
-              'name': 'Paytm',
-              'icon': base64Decode(
-                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
-              ),
-            },
-          ];
-        case 'startTransaction':
-          startTxnCalls.add(
-            Map<dynamic, dynamic>.from(call.arguments as Map),
-          );
-          return 'txnId=UPI_FAIL&status=failure&txnRef=APT123';
-      }
-      return null;
-    });
-    messenger.setMockMethodCallHandler(
-      fallbackChannel,
-      (call) async => <Map<dynamic, dynamic>>[],
-    );
-    addTearDown(() {
-      messenger.setMockMethodCallHandler(upiChannel, null);
-      messenger.setMockMethodCallHandler(fallbackChannel, null);
-    });
+    responseQueue.add('txnid=UPI_FAIL1&status=failure');
+    responseQueue.add('txnid=UPI_FAIL2&status=failure');
 
     await pumpBookingFlow(tester);
     await openPaymentSheet(tester);
 
     await tester.tap(find.text('Online Pay (UPI)'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Paytm'));
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
@@ -434,18 +399,15 @@ void main() {
     expect(find.text('Try Again'), findsOneWidget);
     expect(find.text('Pay Offline'), findsOneWidget);
 
-    // Try Again re-opens the app picker; picking the app fires the
-    // transaction again (still declined) and the dialog returns.
+    // Try Again re-fires the UPI intent (queued response #2, still
+    // declined) and the dialog returns.
     await tester.tap(find.text('Try Again'));
-    await tester.pumpAndSettle();
-    expect(find.text('Pay with'), findsOneWidget);
-    await tester.tap(find.text('Paytm'));
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(startTxnCalls, hasLength(2));
+    expect(find.text('Payment Failed'), findsOneWidget);
 
-    // Dismissing via the barrier (outside the dialog) also cancels -
+    // Dismissing via the barrier (outside the dialog) also cancels —
     // nothing books, still on the booking screen.
     await tester.tapAt(const Offset(5, 5));
     await tester.pumpAndSettle();
@@ -459,42 +421,12 @@ void main() {
   testWidgets('a declined UPI payment can switch to offline pay and book', (
     tester,
   ) async {
-    const upiChannel = MethodChannel('com.az.upi_india');
-    const fallbackChannel = MethodChannel('drslisting/upi_fallback');
-    final messenger =
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(upiChannel, (call) async {
-      switch (call.method) {
-        case 'getAllUpiApps':
-          return <Map<dynamic, dynamic>>[
-            {
-              'packageName': 'net.one97.paytm',
-              'name': 'Paytm',
-              'icon': base64Decode(
-                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
-              ),
-            },
-          ];
-        case 'startTransaction':
-          return 'txnId=UPI_FAIL&status=failure&txnRef=APT123';
-      }
-      return null;
-    });
-    messenger.setMockMethodCallHandler(
-      fallbackChannel,
-      (call) async => <Map<dynamic, dynamic>>[],
-    );
-    addTearDown(() {
-      messenger.setMockMethodCallHandler(upiChannel, null);
-      messenger.setMockMethodCallHandler(fallbackChannel, null);
-    });
+    responseQueue.add('txnid=UPI_FAIL&status=failure');
 
     await pumpBookingFlow(tester);
     await openPaymentSheet(tester);
 
     await tester.tap(find.text('Online Pay (UPI)'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Paytm'));
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));

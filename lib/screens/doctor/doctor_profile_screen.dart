@@ -1047,297 +1047,6 @@ class _HowItWorksRow extends StatelessWidget {
   }
 }
 
-/// Doctor-set UPI Payment ID: shows the clinic's UPI VPA (the address that
-/// receives online consultation fees) with an edit dialog that persists to
-/// the doctors table's `upi_id` column via [DoctorController.updateDoctorUpiId].
-///
-/// Build is wrapped in its own [Obx] (same pattern as the header / info
-/// sections) so the card live-updates when [DoctorController.currentDoctor]
-/// changes — a bare StatefulWidget would not react to the Rx value because
-/// the read happens in the child State's build, outside the screen-level
-/// Obx's dependency window.
-class _UpiIdCard extends StatelessWidget {
-  final DoctorController controller;
-  const _UpiIdCard({required this.controller});
-
-  String? get _upiId => controller.currentDoctor.value?.upiId;
-
-  Future<void> _edit(BuildContext context) async {
-    // The dialog owns its TextEditingController (created in initState,
-    // disposed when the dialog State unmounts) so the field is never used
-    // after disposal during the route's exit animation.
-    final saved = await Get.dialog<bool>(
-      _UpiEditDialog(
-        initialUpiId: _upiId ?? '',
-        controller: controller,
-      ),
-    );
-    if (saved == true && context.mounted) {
-      showSuccessSnackbar('UPI Payment ID updated');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Obx(() {
-      final upiId = _upiId?.trim() ?? '';
-      final hasUpi = upiId.isNotEmpty;
-      return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.bgCard,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(6),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 4,
-                height: 18,
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(width: 10),
-              const Icon(
-                Icons.account_balance_wallet_rounded,
-                size: 18,
-                color: AppColors.primary,
-              ),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'UPI Payment ID',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textHeading,
-                  ),
-                ),
-              ),
-              Material(
-                color: AppColors.primary.withAlpha(12),
-                borderRadius: BorderRadius.circular(10),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () => _edit(context),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.edit_rounded,
-                          size: 14,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          hasUpi ? 'Edit' : 'Add',
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: hasUpi
-                  ? AppColors.primary.withAlpha(8)
-                  : AppColors.textCaption.withAlpha(8),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: hasUpi
-                    ? AppColors.primary.withAlpha(35)
-                    : AppColors.textCaption.withAlpha(25),
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  hasUpi
-                      ? Icons.check_circle_rounded
-                      : Icons.info_outline_rounded,
-                  size: 18,
-                  color: hasUpi ? AppColors.primary : AppColors.textCaption,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    hasUpi
-                        ? upiId
-                        : 'Not set — patients pay the default clinic VPA.',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: hasUpi
-                          ? AppColors.textHeading
-                          : AppColors.textCaption,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Online consultation fees are paid to this UPI ID.',
-            style: TextStyle(
-              fontSize: 12,
-              color: AppColors.textCaption,
-            ),
-          ),
-        ],
-      ),
-      );
-    });
-  }
-}
-
-/// Edit dialog for the doctor's UPI Payment ID: a prefilled text field
-/// with Save (shows an in-button spinner while saving) / Cancel. Owns its
-/// [TextEditingController] for its whole lifecycle so the field is never
-/// used after disposal.
-class _UpiEditDialog extends StatefulWidget {
-  final String initialUpiId;
-  final DoctorController controller;
-
-  const _UpiEditDialog({
-    required this.initialUpiId,
-    required this.controller,
-  });
-
-  @override
-  State<_UpiEditDialog> createState() => _UpiEditDialogState();
-}
-
-class _UpiEditDialogState extends State<_UpiEditDialog> {
-  late final TextEditingController _textController;
-  bool _saving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _textController = TextEditingController(text: widget.initialUpiId);
-  }
-
-  @override
-  void dispose() {
-    _textController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    setState(() => _saving = true);
-    try {
-      await widget.controller.updateDoctorUpiId(_textController.text);
-      if (mounted) Get.back(result: true);
-    } catch (_) {
-      if (mounted) {
-        setState(() => _saving = false);
-        showErrorSnackbar('Could not save the UPI ID. Please try again.');
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: const Text('UPI Payment ID'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Patients pay online consultation fees to this UPI ID '
-            '(e.g. clinic@okhdfcbank). Leave it empty to use the '
-            'default clinic VPA.',
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.45,
-              color: AppColors.textCaption,
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _textController,
-            autofocus: true,
-            keyboardType: TextInputType.emailAddress,
-            textCapitalization: TextCapitalization.none,
-            decoration: InputDecoration(
-              labelText: 'UPI ID',
-              hintText: 'clinic@okhdfcbank',
-              prefixIcon: const Icon(
-                Icons.account_balance_wallet_rounded,
-                size: 20,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(
-                  color: AppColors.primary,
-                  width: 1.6,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Get.back(result: false),
-          child: Text(
-            'Cancel',
-            style: TextStyle(color: AppColors.textCaption),
-          ),
-        ),
-        ElevatedButton(
-          onPressed: _saving ? null : _save,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-          ),
-          child: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Text('Save'),
-        ),
-      ],
-    );
-  }
-}
 
 /// Doctor-set availability: an "Available / Unavailable" status button that
 /// opens the calendar range picker, plus the list of saved unavailable date
@@ -1956,6 +1665,298 @@ class _ShimmerSkeleton extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Doctor-set UPI Payment ID: shows the clinic's UPI VPA (the address that
+/// receives online consultation fees) with an edit dialog that persists to
+/// the doctors table's `upi_id` column via [DoctorController.updateDoctorUpiId].
+///
+/// Build is wrapped in its own [Obx] (same pattern as the header / info
+/// sections) so the card live-updates when [DoctorController.currentDoctor]
+/// changes — a bare StatelessWidget would not react to the Rx value because
+/// the read happens in the child State's build, outside the screen-level
+/// Obx's dependency window.
+class _UpiIdCard extends StatelessWidget {
+  final DoctorController controller;
+  const _UpiIdCard({required this.controller});
+
+  String? get _upiId => controller.currentDoctor.value?.upiId;
+
+  Future<void> _edit(BuildContext context) async {
+    // The dialog owns its TextEditingController (created in initState,
+    // disposed when the dialog State unmounts) so the field is never used
+    // after disposal during the route's exit animation.
+    final saved = await Get.dialog<bool>(
+      _UpiEditDialog(
+        initialUpiId: _upiId ?? '',
+        controller: controller,
+      ),
+    );
+    if (saved == true && context.mounted) {
+      showSuccessSnackbar('UPI Payment ID updated');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      final upiId = _upiId?.trim() ?? '';
+      final hasUpi = upiId.isNotEmpty;
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppColors.bgCard,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(6),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Icon(
+                  Icons.account_balance_wallet_rounded,
+                  size: 18,
+                  color: AppColors.primary,
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'UPI Payment ID',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textHeading,
+                    ),
+                  ),
+                ),
+                Material(
+                  color: AppColors.primary.withAlpha(12),
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => _edit(context),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.edit_rounded,
+                            size: 14,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            hasUpi ? 'Edit' : 'Add',
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: hasUpi
+                    ? AppColors.primary.withAlpha(8)
+                    : AppColors.textCaption.withAlpha(8),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: hasUpi
+                      ? AppColors.primary.withAlpha(35)
+                      : AppColors.textCaption.withAlpha(25),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    hasUpi
+                        ? Icons.check_circle_rounded
+                        : Icons.info_outline_rounded,
+                    size: 18,
+                    color: hasUpi ? AppColors.primary : AppColors.textCaption,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      // No app-wide fallback VPA exists, so an unset ID
+                      // simply means the patient pays at the clinic.
+                      hasUpi ? upiId : 'Not set — patients pay at the clinic.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: hasUpi
+                            ? AppColors.textHeading
+                            : AppColors.textCaption,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Online consultation fees are paid to this UPI ID.',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.textCaption,
+              ),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+}
+
+/// Edit dialog for the doctor's UPI Payment ID: a prefilled text field
+/// with Save (shows an in-button spinner while saving) / Cancel. Owns its
+/// [TextEditingController] for its whole lifecycle so the field is never
+/// used after disposal.
+class _UpiEditDialog extends StatefulWidget {
+  final String initialUpiId;
+  final DoctorController controller;
+
+  const _UpiEditDialog({
+    required this.initialUpiId,
+    required this.controller,
+  });
+
+  @override
+  State<_UpiEditDialog> createState() => _UpiEditDialogState();
+}
+
+class _UpiEditDialogState extends State<_UpiEditDialog> {
+  late final TextEditingController _textController;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _textController = TextEditingController(text: widget.initialUpiId);
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await widget.controller.updateDoctorUpiId(_textController.text);
+      if (mounted) Get.back(result: true);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _saving = false);
+        showErrorSnackbar('Could not save the UPI ID. Please try again.');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Text('UPI Payment ID'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Patients pay online consultation fees to this UPI ID '
+            '(e.g. clinic@okhdfcbank). Leave it empty to fall back to '
+            'pay-at-clinic.',
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: AppColors.textCaption,
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _textController,
+            autofocus: true,
+            keyboardType: TextInputType.emailAddress,
+            textCapitalization: TextCapitalization.none,
+            decoration: InputDecoration(
+              labelText: 'UPI ID',
+              hintText: 'clinic@okhdfcbank',
+              prefixIcon: const Icon(
+                Icons.account_balance_wallet_rounded,
+                size: 20,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(
+                  color: AppColors.primary,
+                  width: 1.6,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Get.back(result: false),
+          child: Text(
+            'Cancel',
+            style: TextStyle(color: AppColors.textCaption),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: _saving ? null : _save,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+          ),
+          child: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Text('Save'),
+        ),
+      ],
     );
   }
 }

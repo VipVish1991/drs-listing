@@ -273,7 +273,7 @@ void main() {
     );
     await tester.pump();
     expect(
-      find.text('Not set — patients pay the default clinic VPA.'),
+      find.text('Not set — patients pay at the clinic.'),
       findsOneWidget,
     );
     expect(find.text('Add'), findsOneWidget);

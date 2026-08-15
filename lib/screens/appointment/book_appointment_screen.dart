@@ -9,20 +9,21 @@ import '../../models/doctor_model.dart';
 import '../../models/payment_model.dart';
 import '../../models/unavailable_range.dart';
 import '../../routes/app_routes.dart';
+import '../../services/quantupi_payment_service.dart';
 import '../../services/supabase_service.dart';
-import '../../services/upi_payment_service.dart';
 import '../../widgets/booking_block_banner.dart';
+import '../../widgets/payment_method_tile.dart';
 import '../../widgets/doctor_avatar.dart';
-import '../../widgets/upi_app_picker_sheet.dart';
 import '../../utils/extensions.dart';
 import '../../utils/snackbar_helpers.dart';
 
 /// How the online-pay (UPI) leg of booking ended.
 enum _OnlinePayOutcome {
-  /// Payment confirmed — book with the 'Paid' record.
+  /// The UPI payment CONFIRMED — proceed with the booking (payment row
+  /// status 'Paid', method 'online').
   paid,
 
-  /// Payment failed / not confirmed and the patient chose offline pay.
+  /// The patient switched to offline pay-at-clinic after the UPI attempt.
   payOffline,
 
   /// Nothing should book (dismissed / cancelled / no UPI app).
@@ -72,20 +73,20 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
   /// The next 14 days as displayable items.
   late final List<_DateOption> dateOptions;
 
-  /// The booked doctor's own UPI VPA (trimmed), or null when the doctor
-  /// hasn't set one. Online Pay (UPI) is ONLY offered when this is set —
-  /// a payment without a real receiving VPA can never complete, so the
-  /// patient pays at the clinic instead.
-  String? get _doctorUpiVpa {
-    final upi = doctor.upiId?.trim() ?? '';
-    return upi.isEmpty ? null : upi;
-  }
-
   /// Quick-check whether all required fields are filled.
   bool get _canBook =>
       _patientNameController.text.isNotEmpty &&
       _selectedDateIndex >= 0 &&
       _selectedTimeSlot.isNotEmpty;
+
+  /// The booked doctor's own UPI VPA (trimmed), or null when the doctor
+  /// hasn't set one. Online Pay (UPI) is ONLY offered when this is set —
+  /// a payment without a real receiving VPA can never complete, so the
+  /// booking flow falls back to pay-at-clinic.
+  String? get _doctorUpiVpa {
+    final upi = doctor.upiId?.trim() ?? '';
+    return upi.isEmpty ? null : upi;
+  }
 
   @override
   void initState() {
@@ -178,9 +179,8 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     setState(() {
       // Refresh doctor-set fields from the DB row. The model that reaches
       // this screen usually comes from Google Places search (or the detail
-      // screen's Places enrichment), which never carries upiId — without
-      // this merge the "Consultation Payment" modal would not show the
-      // clinic's receiving VPA even though it is saved on the doctors row.
+      // screen's Places enrichment), which never carries doctor-set state
+      // like availability.
       if (dbDoctor != null) {
         doctor = DoctorController.mergeDoctorSetFields(
           doctor,
@@ -298,14 +298,13 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     // ONLY a CONFIRMED payment (UPI status 'success') books the
     // appointment — an unconfirmed ('submitted') payment never proceeds
     // (see _runUpiPayment). In-clinic visits book directly with an
-    // offline "pay at clinic" record.
+    // offline "pay at clinic" record (skipped when the slot has no fee).
     final consultationType = _controller.getSlotTypeLabel(_selectedTimeSlot);
     final fee = _slotFee(consultationType);
 
     if (!_isPaidConsultationType(consultationType)) {
       // Clinic visit — no up-front payment; record an offline "pay at
-      // clinic" row so the clinic has the payment history (skipped when
-      // the slot has no fee).
+      // clinic" row so the clinic has the payment history.
       final success = await _controller.bookAppointment(
         doctor,
         payment: _offlinePayment(consultationType, fee),
@@ -353,6 +352,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
         amount: fee.toDouble(),
         transactionId: upiResult!.transactionId,
         upiId: _doctorUpiVpa,
+        paidAt: DateTime.now(),
       );
     }
 
@@ -396,10 +396,9 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     } else {
       // The DB-level one-active-booking-per-doctor gate rejected the
       // insert (the patient booked on another device, or a previous
-      // booking landed, in the window since the screen's pre-book check —
-      // a UPI payment can take minutes) — surface the real gate message +
-      // banner instead of the generic failure text. The message is
-      // consumed once.
+      // booking landed, in the window since the screen's pre-book check) —
+      // surface the real gate message + banner instead of the generic
+      // failure text. The message is consumed once.
       final gateMsg = _controller.serverBookingBlockMessage;
       if (gateMsg != null) {
         showErrorSnackbar(gateMsg);
@@ -564,15 +563,15 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     );
   }
 
-  /// Runs the UPI payment flow: lists installed UPI apps, lets the patient
-  /// pick one, fires the intent and maps the outcome. A declined or
-  /// unconfirmed payment shows a dialog (see [_showUpiProblemDialog]) that
-  /// offers to retry with another UPI app, switch to offline pay, or
-  /// cancel — 'retry' loops back to the app picker.
+  /// Runs the UPI payment flow: fires the `upi://pay` intent (Android's
+  /// system chooser lets the patient pick the installed UPI app) and maps
+  /// the outcome. A declined or unconfirmed payment shows a dialog (see
+  /// [_showUpiProblemDialog]) that offers to retry, switch to offline
+  /// pay, or cancel — 'retry' fires the intent again.
   ///
   /// Returns how the online-pay leg ended, plus the payment result when it
   /// actually succeeded (only for [_OnlinePayOutcome.paid]).
-  Future<(_OnlinePayOutcome, UpiPaymentResult?)> _runUpiPayment(
+  Future<(_OnlinePayOutcome, QuantupiPaymentResult?)> _runUpiPayment(
     String type,
     int fee,
   ) async {
@@ -588,37 +587,13 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       return (_OnlinePayOutcome.cancelled, null);
     }
     while (true) {
-      final apps = await UpiPaymentService.instance.getInstalledUpiApps();
-      if (apps.isEmpty) {
-        showErrorSnackbar(
-          'No UPI app found. Please install GPay / PhonePe / Paytm, or '
-          'choose Offline Pay.',
-        );
-        return (_OnlinePayOutcome.cancelled, null);
-      }
-
-      // Let the patient choose which UPI app to pay with.
-      if (!mounted) {
-        return (_OnlinePayOutcome.cancelled, null);
-      }
-      final app = await UpiAppPickerSheet.show(
-        context,
-        apps,
-        payeeUpiId: upiVpa,
-        payeeName: doctor.name,
-      );
-      if (app == null) return (_OnlinePayOutcome.cancelled, null);
-
       final txnRef = 'APT${DateTime.now().millisecondsSinceEpoch}';
-      final result = await UpiPaymentService.instance.pay(
-        app: app,
+      final result = await QuantupiPaymentService.instance.pay(
+        receiverUpiId: upiVpa,
+        receiverName: doctor.name,
         amount: fee.toDouble(),
         transactionRef: txnRef,
         note: '${_typeLabel(type)} fee — ${doctor.name}',
-        // Pay straight into the clinic's own account — the doctor's UPI
-        // ID, verified non-null by the guard above.
-        receiverUpiAddress: upiVpa,
-        receiverName: doctor.name,
       );
 
       if (result.isSuccess) {
@@ -630,7 +605,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       if (!mounted) return (_OnlinePayOutcome.cancelled, null);
       final choice = await _showUpiProblemDialog(submitted: result.isSubmitted);
       if (!mounted) return (_OnlinePayOutcome.cancelled, null);
-      if (choice == 'retry') continue; // pick another UPI app
+      if (choice == 'retry') continue; // fire the intent again
       if (choice == 'offline') return (_OnlinePayOutcome.payOffline, null);
       return (_OnlinePayOutcome.cancelled, null);
     }
@@ -639,8 +614,8 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
   /// Dialog explaining a UPI payment that did not go through — either
   /// declined/cancelled by the bank or UPI app (failure) or
   /// initiated-but-unconfirmed (submitted). Always reassures about the
-  /// money; a plain failure also offers **Try Again** (re-picks another
-  /// UPI app), and both offer **Pay Offline** so the patient is never
+  /// money; a plain failure also offers **Try Again** (re-fires the UPI
+  /// intent), and both offer **Pay Offline** so the patient is never
   /// stuck without a way to book.
   ///
   /// Returns the chosen action: 'retry' (failure only), 'offline', or

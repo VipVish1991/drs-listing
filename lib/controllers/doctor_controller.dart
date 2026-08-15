@@ -258,18 +258,9 @@ class DoctorController extends GetxController {
     return dates;
   }
 
-  /// Update the doctor profile's display name (doctors table) and refresh
-  /// [currentDoctor] so every screen showing it — the dashboard header, the
-  /// profile screen and the QR book dialog — updates in place. The name is
-  /// capitalized to match the DB formatting in
-  /// [SupabaseService.saveDoctorToDb].
-  ///
-  /// The upsert goes through [SupabaseService.saveDoctorToDb], which strips
-  /// `unavailable_ranges` and null fields from the payload — so this
-  /// name-only update can never wipe doctor-set state (availability).
-  /// Update the doctor's UPI VPA (the address that receives online
-  /// consultation fees). Empty input clears it back to the app-wide
-  /// default VPA in the booking flow.
+  /// Save (or clear, when empty) the clinic's UPI VPA — the address that
+  /// receives online consultation fees. Persists to `doctors.upi_id` and
+  /// refreshes [currentDoctor] so the profile card updates in place.
   Future<void> updateDoctorUpiId(String upiId) async {
     final doctor = currentDoctor.value;
     if (doctor == null) return;
@@ -285,6 +276,10 @@ class DoctorController extends GetxController {
     currentDoctor.value = updated;
   }
 
+  /// Update the doctor profile's display name (doctors table) and refresh
+  /// [currentDoctor] so every screen showing it — the dashboard header, the
+  /// profile screen and the QR book dialog — updates in place. The name is
+  /// capitalized to match the DB formatting in
   /// Update appointment status (Cancel / Complete).
   Future<void> updateAppointmentStatus(
     String appointmentId,
@@ -414,10 +409,10 @@ class DoctorController extends GetxController {
   }
 
   /// Merge Google Places-enriched details with the doctor-set fields from
-  /// the DB row (`upiId`, `unavailableRanges`, `experienceYears`) that the
+  /// the DB row (`unavailableRanges`, `experienceYears`) that the
   /// Places API never returns. Without this merge, reloading/saving the
-  /// Places model silently drops those fields and screens (e.g. the doctor
-  /// profile UPI card) show "Not set" even though the DB value is intact.
+  /// Places model silently drops those fields and screens show "Not set"
+  /// even though the DB value is intact.
   ///
   /// Every Places-enrichment site must go through this so the merge can
   /// never drift apart: [loadDoctorFromDb] and
@@ -429,9 +424,12 @@ class DoctorController extends GetxController {
   ) {
     return placesDetails.copyWith(
       userId: userId,
-      upiId: dbDoctor?.upiId,
       unavailableRanges: dbDoctor?.unavailableRanges ?? const [],
       experienceYears: dbDoctor?.experienceYears,
+      // Doctor-set payment details (UPI VPA) never come from Google
+      // Places — without the merge a re-login silently drops the saved
+      // VPA and the profile / booking flow shows "Not set".
+      upiId: dbDoctor?.upiId,
     );
   }
 
@@ -451,11 +449,11 @@ class DoctorController extends GetxController {
         final fullDetails = await _places.getDoctorDetails(placeId);
         if (fullDetails != null) {
           // Merge the Places-enriched model with doctor-set fields from the
-          // DB (upiId, unavailableRanges, experienceYears) that Google
-          // Places never returns. Without this, saving the Places model
+          // DB (unavailableRanges, experienceYears) that Google Places
+          // never returns. Without this, saving the Places model
           // overwrites the local currentDoctor with a model that has no
-          // upiId, and the profile screen shows "Not set" even though the
-          // DB value is intact.
+          // doctor-set state, and the profile screen shows "Not set" even
+          // though the DB value is intact.
           final enriched = mergeDoctorSetFields(fullDetails, dbDoctor, userId);
           currentDoctor.value = enriched;
           await _supabase.saveDoctorToDb(enriched);

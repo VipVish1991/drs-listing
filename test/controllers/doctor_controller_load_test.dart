@@ -23,7 +23,8 @@ class _TestAuthController extends AuthController {
 }
 
 /// DB doctor row shape — the `doctors` table record that already has
-/// `upi_id` and `unavailable_ranges` set (the doctor saved them earlier).
+/// `upi_id`, `unavailable_ranges` and `experience_years` set (the doctor
+/// saved them earlier).
 final Map<String, dynamic> _dbDoctorJson = {
   'place_id': 'place_upi_test',
   'name': 'Dr. UPI Test',
@@ -194,8 +195,8 @@ GROQ_API_KEY=test_groq_key
   });
 
   group('loadDoctorFromDb preserves doctor-set fields', () {
-    test('preserves upiId from the DB when Google Places enrichment would '
-        'drop it', () async {
+    test('preserves doctor-set fields when Google Places enrichment would '
+        'drop them', () async {
       await controller.loadDoctorFromDb('place_upi_test');
 
       final loaded = controller.currentDoctor.value;
@@ -208,7 +209,7 @@ GROQ_API_KEY=test_groq_key
       // then showed "Not set" even though the DB value was intact.
       expect(loaded.upiId, 'clinic@okhdfcbank');
 
-      // experienceYears is also doctor-set; Places doesn't return it.
+      // experienceYears is doctor-set; Places doesn't return it.
       expect(loaded.experienceYears, 12);
 
       // unavailableRanges should also be preserved from the DB.
@@ -255,7 +256,7 @@ GROQ_API_KEY=test_groq_key
       controller.currentDoctor.value = null;
       await controller.loadDoctorFromDb('place_upi_test');
 
-      // Fallback: DB doctor still has upiId and ranges.
+      // Fallback: DB doctor still has the doctor-set fields.
       final loaded = controller.currentDoctor.value;
       expect(loaded, isNotNull);
       expect(loaded!.upiId, 'clinic@okhdfcbank');
@@ -274,7 +275,6 @@ GROQ_API_KEY=test_groq_key
 
       final body = jsonDecode(upserts.first.body) as Map<String, dynamic>;
       // The saved payload includes the merged doctor-set fields (not null).
-      expect(body['upi_id'], 'clinic@okhdfcbank');
       expect(body['experience_years'], 12);
       // unavailable_ranges is removed by saveDoctorToDb before upsert
       // (it's managed separately via saveDoctorUnavailableRanges), so

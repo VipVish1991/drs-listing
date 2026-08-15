@@ -9,7 +9,7 @@
 # packages, and plugins designed to encourage good coding practices.
 analyzer:
   exclude:
-    # Vendored third-party packages (third_party/upi_india) are upstream
+    # Vendored third-party packages (third_party/quantupi) are upstream
     # source, not project code — the analyzer shouldn't lint them.
     - third_party/**
   errors:
