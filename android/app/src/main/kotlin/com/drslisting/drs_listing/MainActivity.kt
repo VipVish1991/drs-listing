@@ -10,8 +10,10 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
 import android.util.Base64
+import com.example.quantupi.QuantupiPlugin
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -40,6 +42,36 @@ class MainActivity : FlutterActivity() {
     /// for the home screen's offline connectivity status card. See
     /// WifiStatusService.getWifiStatus.
     private val wifiInfoChannel = "drslisting/wifi_info"
+
+    /// Forwards a UPI return intent to the plugin so the pending payment
+    /// promise resolves. The plugin's pending result is process-static, so
+    /// it resolves even when the return intent lands on a fresh activity
+    /// instance instead of the one that fired the payment (taskAffinity=""
+    /// lets UPI apps relaunch a NEW instance).
+    private fun forwardUpiReturn(intent: Intent): Boolean {
+        if (intent.data?.scheme?.equals("upi", ignoreCase = true) != true) return false
+        QuantupiPlugin.handleNewIntent(intent)
+        return true
+    }
+
+    /// UPI payment responses come back two ways:
+    ///   1. onActivityResult — handled inside QuantupiPlugin.
+    ///   2. A fresh `upi://pay?…` VIEW intent relaunching this activity
+    ///      (PhonePe / GPay / Paytm do this). It only lands here if this
+    ///      activity declares a `upi` scheme intent-filter (see the
+    ///      manifest). The return can reach either a recreated activity
+    ///      (onCreate → handled below) or the existing singleTop instance
+    ///      (onNewIntent → handled below); both forward to the plugin —
+    ///      otherwise the payment never resolves and the booking hangs.
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        forwardUpiReturn(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        forwardUpiReturn(intent)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

@@ -61,6 +61,19 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="drslisting"/>
             </intent-filter>
+            <!-- UPI payment responses: PhonePe / GPay / Paytm return the
+                 result by relaunching this app with a fresh
+                 `upi://pay?…` VIEW intent rather than onActivityResult.
+                 This filter makes Android deliver that intent to
+                 MainActivity.onNewIntent, which forwards it to the
+                 QuantupiPlugin so the payment promise resolves. Without
+                 it the app never sees the response and the booking hangs. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="upi"/>
+            </intent-filter>
 
             <!-- App Links (https://drslisting.ai/book|manage-slots/{placeId}).
                  autoVerify requires /.well-known/assetlinks.json to be hosted
