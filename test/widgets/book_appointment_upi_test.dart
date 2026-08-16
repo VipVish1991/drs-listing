@@ -89,6 +89,33 @@ class _VideoSlotAppointmentController extends AppointmentController {
   }
 }
 
+/// AppointmentController double: provides an IN-CLINIC slot (fee ₹500) for
+/// tomorrow. Clinic visits are paid consultations too — tapping Book must
+/// open the same payment method sheet (Online UPI / Offline), not book
+/// silently with a pay-at-clinic record.
+class _ClinicSlotAppointmentController
+    extends _VideoSlotAppointmentController {
+  @override
+  Future<void> loadDoctorSlots(String doctorPlaceId) async {
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final dayOfWeek =
+        _VideoSlotAppointmentController._fullDayNames[tomorrow.weekday - 1];
+    doctorSlots.value = [
+      DoctorSlot(
+        doctorPlaceId: doctorPlaceId,
+        dayOfWeek: dayOfWeek,
+        scheduleType: 'clinic',
+        startTime: '09:00',
+        endTime: '12:00',
+        durationMinutes: 30,
+        fee: 500,
+        slots: ['9:00 AM', '9:30 AM', '10:00 AM'],
+        isEnabled: true,
+      ),
+    ];
+  }
+}
+
 /// Stub targets for the booking success navigation (not reached in most
 /// tests, but required so the route table is complete).
 class _HomeStub extends StatelessWidget {
@@ -302,10 +329,39 @@ void main() {
     expect(find.text('Offline Pay'), findsOneWidget);
   });
 
+  testWidgets('clinic-slot bookings also show the payment sheet with '
+      'Online/Offline options', (tester) async {
+    // Swap in a controller that provides an In-Clinic slot. Previously
+    // only Tele/Video bookings opened the payment sheet — in-clinic
+    // bookings booked silently with a pay-at-clinic record. Every paid
+    // consultation must offer the same Online (UPI) / Offline choice.
+    Get.reset();
+    Get.put<AuthController>(_TestAuthController(), permanent: true);
+    Get.put<AppointmentController>(
+      _ClinicSlotAppointmentController(),
+      permanent: true,
+    );
+
+    await pumpBookingFlow(tester);
+    await openPaymentSheet(tester);
+
+    // The same Consultation Payment sheet appears, labeled for the
+    // In-Clinic visit, with both payment options (the doctor set a UPI
+    // VPA in the DB, so Online Pay is offered).
+    expect(find.text('Consultation Payment'), findsOneWidget);
+    expect(find.text('In-Clinic  •  ₹500'), findsOneWidget);
+    expect(find.text('Pay to: clinic@okhdfcbank'), findsOneWidget);
+    expect(find.text('Online Pay (UPI)'), findsOneWidget);
+    expect(find.text('Offline Pay'), findsOneWidget);
+  });
+
   testWidgets('a confirmed UPI payment books with an online Paid record', (
     tester,
   ) async {
-    responseQueue.add('upi://pay?txnid=UPI_OK123&status=success');
+    responseQueue.add(
+      'upi://pay?txnid=UPI_OK123&status=success&responsecode=00'
+      '&approvalrefno=APP42&txnref=APT123&appid=com.phonepe.app',
+    );
 
     await pumpBookingFlow(tester);
     await openPaymentSheet(tester);
@@ -327,6 +383,12 @@ void main() {
     expect(payment.amount, 800);
     expect(payment.transactionId, 'UPI_OK123');
     expect(payment.upiId, 'clinic@okhdfcbank');
+    // Every field the UPI app returned is recorded for tracking.
+    expect(payment.approvalRefNo, 'APP42');
+    expect(payment.responseCode, '00');
+    expect(payment.txnRef, 'APT123');
+    expect(payment.upiAppId, 'com.phonepe.app');
+    expect(payment.rawResponse, contains('status=success'));
 
     // The success dialog appears.
     await tester.pumpAndSettle();

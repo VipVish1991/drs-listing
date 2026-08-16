@@ -428,6 +428,8 @@ void main() {
     // Status chips.
     expect(find.text('Paid'), findsOneWidget);
     expect(find.text('Pending'), findsOneWidget);
+    // Settled-time meta chip shows date AND time (not just the day).
+    expect(find.text('06-08-2026, 10:30 AM'), findsNWidgets(2));
   });
 
   testWidgets('a status flip refreshes the open list (Pending → Paid)', (

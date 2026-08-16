@@ -86,13 +86,13 @@ Future<void> _pumpHomeScreen(WidgetTester tester) async {
   await tester.pumpWidget(
     MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
   );
-  await tester.pump(const Duration(milliseconds: 1500));
+  await tester.pump(const Duration(milliseconds: 3000));
 }
 
 /// Lets every flutter_animate effect on the screen run to completion so no
 /// "Timer is still pending" guard trips at the end of a test (mirrors
 /// main_shell_test.dart). The extra beat covers the welcome flow — avatar
-/// video and greeting audio start together at 1.5s — so its timers have
+/// video and greeting audio start together at 3s — so its timers have
 /// fully fired by the end of the test.
 Future<void> _settleAnimations(WidgetTester tester) async {
   await tester.pump(const Duration(seconds: 1));

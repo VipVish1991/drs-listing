@@ -110,7 +110,7 @@ void main() {
     expect(vc.initSpeechCalls, 1);
 
     // Flush the welcome flow timers so nothing leaks between tests.
-    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pump(const Duration(milliseconds: 3000));
     await tester.pump(const Duration(seconds: 5));
   });
 
@@ -145,7 +145,7 @@ void main() {
         reason: 'mic permission is asked exactly once, right after GPS');
 
     // Flush the welcome-flow timers so nothing leaks between tests.
-    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pump(const Duration(milliseconds: 3000));
     await tester.pump(const Duration(seconds: 5));
   });
 
@@ -165,7 +165,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(vc.initSpeechCalls, 1);
 
-    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pump(const Duration(milliseconds: 3000));
     await tester.pump(const Duration(seconds: 5));
   });
 }

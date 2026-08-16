@@ -19,6 +19,18 @@ class PaymentModel {
   final String currency;
   final String? transactionId; // UPI txnId / approval ref (online only)
   final String? upiId; // receiver (merchant) UPI VPA
+  /// Bank approval reference number from the UPI response (online only).
+  final String? approvalRefNo;
+  /// The UPI app's response code ('00' = success, or the raw value).
+  final String? responseCode;
+  /// The transaction ref the intent was fired with, echoed back by the
+  /// UPI app — reconciles the recorded payment to the bank statement.
+  final String? txnRef;
+  /// Package id of the UPI app that processed the payment (e.g.
+  /// `com.dreamplug.androidapp` for Cred, `com.phonepe.app`, …).
+  final String? upiAppId;
+  /// The complete raw UPI response string, stored verbatim for disputes.
+  final String? rawResponse;
   final DateTime? paidAt;
   final DateTime? createdAt;
 
@@ -38,6 +50,11 @@ class PaymentModel {
     this.currency = 'INR',
     this.transactionId,
     this.upiId,
+    this.approvalRefNo,
+    this.responseCode,
+    this.txnRef,
+    this.upiAppId,
+    this.rawResponse,
     this.paidAt,
     this.createdAt,
   });
@@ -97,11 +114,21 @@ class PaymentModel {
       currency: json['currency']?.toString() ?? 'INR',
       transactionId: json['transaction_id']?.toString(),
       upiId: json['upi_id']?.toString(),
+      approvalRefNo: json['approval_ref_no']?.toString(),
+      responseCode: json['response_code']?.toString(),
+      txnRef: json['txn_ref']?.toString(),
+      upiAppId: json['upi_app_id']?.toString(),
+      rawResponse: json['raw_response']?.toString(),
+      // The DB stores TIMESTAMPTZ, so PostgREST returns UTC ISO strings
+      // (…Z). DateTime.tryParse keeps the UTC zone, which would display
+      // 5:30h off local time everywhere (cards, details sheet, CSV,
+      // month groups) — normalize to local at parse time so every
+      // consumer shows the user's own timezone.
       paidAt: json['paid_at'] != null
-          ? DateTime.tryParse(json['paid_at'].toString())
+          ? DateTime.tryParse(json['paid_at'].toString())?.toLocal()
           : null,
       createdAt: json['created_at'] != null
-          ? DateTime.tryParse(json['created_at'].toString())
+          ? DateTime.tryParse(json['created_at'].toString())?.toLocal()
           : null,
     );
   }
@@ -139,6 +166,11 @@ class PaymentModel {
       'currency': currency,
       if (transactionId != null) 'transaction_id': transactionId,
       if (upiId != null) 'upi_id': upiId,
+      if (approvalRefNo != null) 'approval_ref_no': approvalRefNo,
+      if (responseCode != null) 'response_code': responseCode,
+      if (txnRef != null) 'txn_ref': txnRef,
+      if (upiAppId != null) 'upi_app_id': upiAppId,
+      if (rawResponse != null) 'raw_response': rawResponse,
       if (paidAt != null) 'paid_at': paidAt!.toUtc().toIso8601String(),
     };
   }
@@ -163,6 +195,11 @@ class PaymentModel {
       currency: currency,
       transactionId: transactionId ?? this.transactionId,
       upiId: upiId,
+      approvalRefNo: approvalRefNo,
+      responseCode: responseCode,
+      txnRef: txnRef,
+      upiAppId: upiAppId,
+      rawResponse: rawResponse,
       paidAt: paidAt ?? this.paidAt,
       createdAt: createdAt,
     );

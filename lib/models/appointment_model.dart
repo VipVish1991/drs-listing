@@ -26,6 +26,12 @@ class AppointmentModel {
   final Map<String, dynamic>? mapLocation;
   final String? symptoms;
   final String? patientName;
+
+  /// Shared Google Meet URL for this video/tele consultation. Null until
+  /// either side starts the meeting (the SDK flow saves the created
+  /// `meet.google.com/<id>` link here) — afterwards BOTH sides join the
+  /// same room from the details sheet.
+  final String? meetLink;
   final String status;
   final DateTime? createdAt;
 
@@ -37,12 +43,6 @@ class AppointmentModel {
   /// Public Supabase Storage URLs of uploaded prescription photos.
   /// Empty for appointments without a prescription yet.
   final List<String> prescriptionUrls;
-
-  /// The shared Google Meet URL for this appointment's video consultation
-  /// (`https://meet.google.com/xxx-xxxx-xxx`). Null until either side
-  /// starts a meeting and saves the link — the launcher+share integration
-  /// only stores REAL Google-generated links, never made-up codes.
-  final String? meetLink;
 
   /// Appointment date formatted for display as `dd-MM-yyyy` (e.g.
   /// "08-08-2026"), the format used across the app's UI. The raw
@@ -64,11 +64,6 @@ class AppointmentModel {
   /// the only types where the doctor can attach a prescription.
   bool get isRemoteConsultation =>
       consultationType == 'tele' || consultationType == 'video';
-
-  /// Whether this appointment is a VIDEO consultation — the only type
-  /// that gets the Google Meet video-call actions (Tele is a phone call;
-  /// Clinic is in person).
-  bool get isVideoConsultation => consultationType == 'video';
 
   /// Human-readable label for [consultationType] (matches the booking
   /// screen's labels): 'Tele Consultation' | 'Video Consultation' |
@@ -102,11 +97,11 @@ class AppointmentModel {
     this.mapLocation,
     this.symptoms,
     this.patientName,
+    this.meetLink,
     this.status = 'Upcoming',
     this.createdAt,
     this.consultationType,
     this.prescriptionUrls = const [],
-    this.meetLink,
   });
 
   factory AppointmentModel.fromJson(Map<String, dynamic> json) {
@@ -146,12 +141,17 @@ class AppointmentModel {
           : null,
       symptoms: TextSanitizer.sanitize(json['symptoms']?.toString()),
       patientName: TextSanitizer.sanitize(json['patient_name']?.toString()),
+      // Sanitize, then collapse an empty value to null so "no room set"
+      // reads consistently (the sheet/service check isNotEmpty on this).
+      meetLink: () {
+        final raw = TextSanitizer.sanitize(json['meet_link']?.toString());
+        return raw.isEmpty ? null : raw;
+      }(),
       status: json['status']?.toString() ?? 'Upcoming',
       consultationType: json['consultation_type']?.toString().isNotEmpty == true
           ? json['consultation_type'].toString()
           : null,
       prescriptionUrls: _parsePrescriptionUrls(json['upload_prescription']),
-      meetLink: TextSanitizer.sanitize(json['meet_link']?.toString()),
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'].toString())
           : null,
@@ -197,10 +197,10 @@ class AppointmentModel {
       'map_location': mapLocation,
       'symptoms': symptoms,
       'patient_name': patientName,
+      if (meetLink != null && meetLink!.isNotEmpty) 'meet_link': meetLink,
       'status': status,
       'consultation_type': consultationType,
       if (prescriptionUrls.isNotEmpty) 'upload_prescription': prescriptionUrls,
-      if (meetLink != null && meetLink!.isNotEmpty) 'meet_link': meetLink,
       'created_at': createdAt?.toIso8601String(),
     };
   }
@@ -222,10 +222,10 @@ class AppointmentModel {
       mapLocation: mapLocation,
       symptoms: symptoms,
       patientName: patientName,
+      meetLink: meetLink ?? this.meetLink,
       status: status ?? this.status,
       consultationType: consultationType,
       prescriptionUrls: prescriptionUrls ?? this.prescriptionUrls,
-      meetLink: meetLink ?? this.meetLink,
       createdAt: createdAt,
     );
   }

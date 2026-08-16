@@ -324,7 +324,6 @@ CREATE TABLE IF NOT EXISTS public.appointments (
     patient_phone       TEXT,
     consultation_type   TEXT,
     upload_prescription TEXT[] DEFAULT '{}',
-    meet_link           TEXT,
     status              TEXT NOT NULL DEFAULT 'Upcoming'
                             CHECK (status IN ('Pending', 'Upcoming', 'Completed', 'Cancelled')),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -338,7 +337,6 @@ COMMENT ON COLUMN public.appointments.map_location IS 'JSON with latitude/longit
 COMMENT ON COLUMN public.appointments.patient_phone IS 'Patient mobile number captured at booking time (tap-to-dial on doctor side)';
 COMMENT ON COLUMN public.appointments.consultation_type IS 'Booking schedule type: tele | video | clinic (null for legacy rows). Prescription upload is offered only for tele/video.';
 COMMENT ON COLUMN public.appointments.upload_prescription IS 'Public Supabase Storage URLs of uploaded prescription photos, newest appended last.';
-COMMENT ON COLUMN public.appointments.meet_link IS 'Shared Google Meet URL for video consultations (null until a meeting is started and the link is saved).';
 COMMENT ON COLUMN public.appointments.status IS 'Lifecycle status: Pending (QR web booking awaiting confirmation) → Upcoming → Completed | Cancelled';
 
 -- Indexes for common query patterns

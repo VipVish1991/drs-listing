@@ -302,4 +302,39 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
     await _settleAnimations(tester);
   });
+
+  testWidgets('Video Consultation card renders with a Start Consultation '
+      'button on the doctor profile', (tester) async {
+    final doctor = doctorBasic(placeId: 'meet_test', name: 'Dr. Meet');
+    await _pumpProfile(tester, doctor);
+
+    // The card sits between Availability and the bottom actions — scroll
+    // it into view (the profile is a long scroll view).
+    await tester.scrollUntilVisible(
+      find.text('Video Consultation'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pump();
+
+    expect(find.text('Video Consultation'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('start_video_consultation')),
+      findsOneWidget,
+    );
+    expect(find.text('Start Consultation'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('start_video_consultation')),
+      findsOneWidget,
+    );
+
+    // The button is not disabled and the card is not shown when there is
+    // no loaded doctor (skeleton state) — the doctor is loaded here.
+    final button = tester.widget<OutlinedButton>(
+      find.byKey(const ValueKey('start_video_consultation')),
+    );
+    expect(button.onPressed, isNotNull);
+
+    await _settleAnimations(tester);
+  });
 }

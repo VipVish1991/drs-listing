@@ -259,8 +259,12 @@ void main() {
       findsNothing,
     );
 
-    // A valid selection books straight through.
+    // A valid selection books straight through — the payment sheet
+    // appears (every paid consultation asks how to pay), so pick Offline
+    // Pay to complete the booking.
     await _tapBookWithValidSelection(tester);
+    await tester.tap(find.text('Offline Pay'));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(controller.bookAppointmentCalls, 1);
 
@@ -291,8 +295,11 @@ void main() {
       findsNothing,
     );
 
-    // A valid selection books straight through.
+    // A valid selection books straight through — pick Offline Pay on the
+    // payment sheet to complete the booking.
     await _tapBookWithValidSelection(tester);
+    await tester.tap(find.text('Offline Pay'));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(controller.bookAppointmentCalls, 1);
     expect(find.text('Appointment Booked!'), findsOneWidget);

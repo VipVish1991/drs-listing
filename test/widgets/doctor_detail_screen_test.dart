@@ -8,6 +8,7 @@ import 'package:DrsListing/controllers/auth_controller.dart';
 import 'package:DrsListing/controllers/doctor_controller.dart';
 import 'package:DrsListing/controllers/profile_controller.dart';
 import 'package:DrsListing/controllers/voice_controller.dart';
+import 'package:DrsListing/models/doctor_model.dart';
 import 'package:DrsListing/screens/doctor_search/doctor_detail_screen.dart';
 import 'package:DrsListing/routes/app_routes.dart';
 import '../helpers/test_data.dart';
@@ -155,6 +156,64 @@ void main() {
     // No crash — the screen bootstraps from the minimal args and shows
     // the doctor name (it fetches full details by placeId on load).
     expect(find.textContaining('History Doctor'), findsAtLeastNWidgets(1));
+  });
+
+  testWidgets(
+      'UPI Payment ID card shows the doctor VPA when set, hidden when not',
+      (tester) async {
+    Future<void> pumpDoctor(DoctorModel doctor) async {
+      await tester.pumpWidget(
+        GetMaterialApp(
+          theme: AppTheme.lightTheme,
+          home: const SizedBox(),
+          getPages: [
+            GetPage(
+              name: AppRoutes.doctorDetail,
+              page: () => const DoctorDetailScreen(),
+            ),
+          ],
+        ),
+      );
+      await tester.runAsync(() async {
+        Get.toNamed(AppRoutes.doctorDetail, arguments: {'doctor': doctor});
+        await Future.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+    }
+
+    // Doctor with a UPI VPA set → the card renders with the address.
+    // The card sits below the fold in the lazy SliverList, so scroll to it.
+    final withUpi = doctorBasic(
+      placeId: 'upi_card_test',
+      name: 'Upi Card Doctor',
+      latitude: null,
+      longitude: null,
+    ).copyWith(upiId: 'clinic@okhdfcbank');
+    await pumpDoctor(withUpi);
+    await tester.dragUntilVisible(
+      find.text('UPI Payment ID'),
+      find.byType(CustomScrollView),
+      const Offset(0, -300),
+      maxIteration: 20,
+    );
+    await tester.pump();
+    expect(find.text('UPI Payment ID'), findsOneWidget);
+    expect(find.text('clinic@okhdfcbank'), findsOneWidget);
+
+    // Doctor without a UPI VPA → no card (they collect at the clinic).
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    final withoutUpi = doctorBasic(
+      placeId: 'upi_card_test2',
+      name: 'No Upi Doctor',
+      latitude: null,
+      longitude: null,
+    );
+    await pumpDoctor(withoutUpi);
+    expect(find.text('UPI Payment ID'), findsNothing);
   });
 
 }

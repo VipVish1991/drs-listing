@@ -293,27 +293,23 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     _controller.symptoms.value = _symptomsController.text;
 
     // ── Consultation payment ───────────────────────────────────────
-    // Tele & Video consultations are paid for up-front: the patient picks
-    // Online Pay (UPI intent) or Offline Pay (settle at the clinic), and
-    // ONLY a CONFIRMED payment (UPI status 'success') books the
-    // appointment — an unconfirmed ('submitted') payment never proceeds
-    // (see _runUpiPayment). In-clinic visits book directly with an
-    // offline "pay at clinic" record (skipped when the slot has no fee).
+    // Every paid consultation (Tele / Video / In-Clinic) asks how the
+    // patient wants to pay: Online Pay (UPI intent) or Offline Pay
+    // (settle at the clinic), and ONLY a CONFIRMED payment (UPI status
+    // 'success') books the appointment — an unconfirmed ('submitted')
+    // payment never proceeds (see _runUpiPayment). A slot with no fee
+    // books directly with no payment record.
     final consultationType = _controller.getSlotTypeLabel(_selectedTimeSlot);
     final fee = _slotFee(consultationType);
 
-    if (!_isPaidConsultationType(consultationType)) {
-      // Clinic visit — no up-front payment; record an offline "pay at
-      // clinic" row so the clinic has the payment history.
-      final success = await _controller.bookAppointment(
-        doctor,
-        payment: _offlinePayment(consultationType, fee),
-      );
+    // No fee — nothing to pay; book directly without a payment record.
+    if (fee <= 0) {
+      final success = await _controller.bookAppointment(doctor);
       await _handleBookingResult(selected, success);
       return;
     }
 
-    // Tele / Video — ask how the patient wants to pay.
+    // Ask how the patient wants to pay.
     final method = await _showPaymentMethodSheet(consultationType, fee);
     if (method == null) {
       // Dismissed — no booking.
@@ -352,6 +348,14 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
         amount: fee.toDouble(),
         transactionId: upiResult!.transactionId,
         upiId: _doctorUpiVpa,
+        // Every field the UPI app returned is recorded so the payment can
+        // be tracked/reconciled: approval ref, response code, the echoed
+        // txn ref, which UPI app processed it, and the raw response.
+        approvalRefNo: upiResult.approvalRefNo,
+        responseCode: upiResult.responseCode,
+        txnRef: upiResult.txnRef,
+        upiAppId: upiResult.appId,
+        rawResponse: upiResult.rawResponse,
         paidAt: DateTime.now(),
       );
     }
@@ -415,13 +419,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     }
   }
 
-  /// Tele & Video consultations are paid up-front; in-clinic visits are
-  /// settled at the clinic (offline record only).
-  bool _isPaidConsultationType(String type) {
-    return type == 'tele' || type == 'video';
-  }
-
-  /// Bottom sheet asking how the patient wants to pay for a Tele/Video
+  /// Bottom sheet asking how the patient wants to pay for a
   /// consultation. Returns 'online' or 'offline'; null when dismissed.
   Future<String?> _showPaymentMethodSheet(String type, int fee) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;

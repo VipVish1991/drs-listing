@@ -141,14 +141,6 @@ class AppConstants {
   static const String groqBaseUrl = 'https://api.groq.com/openai/v1';
   static const String groqModel = 'llama-3.3-70b-versatile';
 
-  // ── UPI payments (upi_india) ─────────────────────────────────
-  // Online consultation fees are paid to the BOOKED DOCTOR's own UPI VPA
-  // (doctors.upi_id, set on the profile screen). There is deliberately NO
-  // app-wide fallback VPA: a placeholder like 'drslisting@upi' cannot
-  // receive money, so the booking flow only offers Online Pay when the
-  // doctor has set a real UPI ID (otherwise the patient pays at the
-  // clinic).
-
   // App Settings
   static const int splashDuration = 3; // seconds
   static const int maxChatHistoryLength = 50;

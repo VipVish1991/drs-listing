@@ -213,6 +213,11 @@ class _NearbyDoctorsScreenState extends State<NearbyDoctorsScreen> {
   Future<void> _performTextSearch(String query) async {
     if (query.isEmpty) return;
 
+    // A NEW search must never be served stale cached results — drop the
+    // previously cached search entries so this request hits the live
+    // Google API (fresh listings every time).
+    await _placesService.clearSearchCache();
+
     isSearching.value = true;
     showSlowSearchWarning.value = false;
     errorMessage.value = '';

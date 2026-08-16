@@ -1348,7 +1348,9 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
                             if (paidOn != null)
                               _buildMetaChip(
                                 icon: Icons.event_rounded,
-                                label: _dateLabel(paidOn),
+                                // Date AND time — the payment row must show
+                                // when it was settled, not just the day.
+                                label: _dateTimeLabel(paidOn),
                                 color: AppColors.textCaption,
                               ),
                             _buildMetaChip(

@@ -16,7 +16,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fail fast (before the ~10 min Flutter build) when GitHub Pages isn't
+  # ready to accept the deploy. deploy-pages@v4 only fails at the very end
+  # with an opaque error when Pages is disabled or not set to use GitHub
+  # Actions as the source — this check surfaces that immediately, with the
+  # exact setting to flip, instead of after the build has finished.
+  check-pages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify GitHub Pages is enabled with the GitHub Actions source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          HTTP=$(curl -s -o /tmp/pages.json -w "%{http_code}" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pages")
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::GitHub Pages is not enabled (API returned HTTP $HTTP). Enable it in repo Settings → Pages → Source: 'GitHub Actions', then re-run this workflow."
+            exit 1
+          fi
+
+          BUILD_TYPE=$(jq -r '.build_type // empty' /tmp/pages.json)
+          if [ "$BUILD_TYPE" != "workflow" ]; then
+            echo "::error::GitHub Pages is enabled but its source is '$BUILD_TYPE'. It must be 'workflow' (GitHub Actions): repo Settings → Pages → Source: 'GitHub Actions', then re-run this workflow."
+            exit 1
+          fi
+
+          echo "GitHub Pages is enabled with source 'GitHub Actions' — deploy will succeed."
+
   build:
+    needs: check-pages
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

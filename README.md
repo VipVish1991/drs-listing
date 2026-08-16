@@ -51,7 +51,7 @@ Existing rows stay active after the migration. Migration:
 **Known residual risk (accepted):** the anon key is public and the
 `x-user-id` header is client-settable, so a client that knows a victim's
 UUID could still impersonate them. The hardening removes the
-no-knowledge attacks (mass enumeration, cross-row writes, UPI payment
+no-knowledge attacks (mass enumeration, cross-row writes, payment
 hijack); it does not replace real Supabase Auth + phone-OTP delivery,
 which is the documented production path (the current demo OTP is
 client-generated and verified locally — fine for testing, not for
@@ -62,6 +62,22 @@ production).
 The Supabase scripts talk to the live project's Management API and read
 the access token from `.env.deploy` (or the `SUPABASE_ACCESS_TOKEN` env
 var). Create a token at supabase.com/dashboard/account/tokens.
+
+**Live deployment status.** All pending migrations are **already applied
+to the live project** (applied via the Management API on 2026-08-14 —
+the CLI's migration tracker doesn't reflect the live schema, so a raw
+`supabase db push` would re-run old migrations; apply changes the same
+way the deploy scripts below do):
+
+| Migration | Live status |
+|---|---|
+| `20260813000001_enforce_one_active_booking_per_doctor.sql` | ✅ applied |
+| `20260814000002_harden_ownership_rls.sql` | ✅ applied |
+| `20260814000003_add_users_is_active.sql` | ✅ applied |
+
+New migrations added to `supabase/migrations/` stay **pending** until
+applied to the live project. Apply them
+via the Management API (same mechanism as `deploy_booking.py`).
 
 - **`supabase/deploy_booking.py`** — deploy the booking-page Edge
   Function (migration + function + secret), then **auto-verify** the
@@ -191,20 +207,40 @@ python supabase/deploy_payments.py
 python supabase/deploy_payments_rls.py
 ```
 
-## Consultation Payments (UPI)
+## Consultation Payments (online UPI / offline pay-at-clinic)
 
-Tele & Video consultations are paid up-front when booking: the patient
-picks **Online Pay (UPI)** — an `upi_india` intent to GPay/PhonePe/
-Paytm for the slot's consultation fee — or **Offline Pay** (settle at the
-clinic). In-clinic visits book directly with an offline "pay at clinic"
-record. **Only a CONFIRMED payment (`success` status) proceeds to
-booking** — an unconfirmed `submitted`, `failed` or cancelled payment
-never books the slot. When a payment is declined (e.g. "failed as per
-UPI risk policy" from the UPI app) or left unconfirmed, a clear dialog
-reassures the patient that **no money was deducted** and offers
-**Try Again** (re-picks another UPI app), **Pay Offline** (books with a
-pay-at-clinic record), or **Cancel** — so a blocked payment never leaves
-the patient stuck.
+**Tele & Video consultations are paid up-front** when booking: the patient
+picks **Online Pay (UPI)** — the `quantupi` plugin fires a `upi://pay`
+intent and the phone's UPI apps (GPay/PhonePe/Paytm/…) handle the payment —
+or **Offline Pay** (settle at the clinic). In-clinic visits book directly
+with an offline "pay at clinic" record. **Only a CONFIRMED payment (`success`
+status) proceeds to booking** — an unconfirmed `submitted` or failed
+payment never books the slot. When a payment is declined or left
+unconfirmed, a clear dialog reassures the patient that **no money was
+deducted** and offers **Try Again** (re-fires the UPI intent), **Pay
+Offline** (books with a pay-at-clinic record), or **Cancel** — so a blocked
+payment never leaves the patient stuck.
+
+**Who the patient pays** — each clinic sets its **own receiving UPI VPA**
+(the `upi_id` field on its `doctors` row, editable from the doctor profile's
+UPI Payment ID card). When set, it's surfaced at every step of the flow
+(„Pay to: clinic@okhdfcbank“ pill in the payment sheet), the intent is
+addressed to it, and the recorded `payments` row carries it as `upi_id`.
+Online Pay is **only offered when the doctor has set a real VPA** — there
+is deliberately **no app-wide fallback VPA**: a placeholder address cannot
+receive money, so when a doctor has no UPI ID the patient pays at the clinic.
+
+**Platform support** — UPI intents only work on **Android** (the OS chooser
+picks the installed UPI app); on iOS/web the app falls back to Offline Pay.
+The `quantupi` package is **vendored** at `third_party/quantupi/` (upstream
+0.0.6 is unmaintained and predates AGP 8; the vendored copy patches its
+Android build — the root `android/settings.gradle.kts` namespace shim covers
+the rest). Intent-based UPI has **no server-side verification**, so only a
+`success` status is trusted as paid; a `submitted` (unconfirmed) payment is
+treated as not-paid until the clinic confirms separately. For
+production-grade payment verification, swap `QuantupiPaymentService` for a
+gateway SDK (Razorpay/PhonePe) that returns a server-verifiable
+transaction id.
 
 Every payment is stored in the **`payments`** table (see
 `supabase/migrations/20260809000001_add_payments_table.sql`) linked to the
@@ -226,52 +262,51 @@ fields — never the amount, patient or method.
 
 **Web / QR bookings** (the `booking-page` Edge Function) record the same
 payment automatically: when the booked slot carries a fee, the function
-inserts a `payments` row — method `offline` (the web flow is pay-at-clinic;
-there is no UPI intent on the page), status `Pending`, amount = the slot's
-fee **resolved server-side from `doctor_slots`** (never trusted from the
-client). It then shows up in the patient's Payment History and on the
-doctor's appointments card exactly like an in-app offline payment, ready
-for the clinic to mark Paid/Refunded. Recording the payment is non-fatal
-and never fails a booking. The booking page surfaces it too: the **success
-card** shows a fee chip (e.g. `💵 ₹800 · Offline (Clinic)`) right after
-booking, and the **web history** accordion adds a **Fee** row per booking
-from the payment summary the `history` endpoint now attaches — so the
-patient always sees what they owe and what the clinic settled.
+inserts a `payments` row — method `offline` (pay-at-clinic), status
+`Pending`, amount = the slot's fee **resolved server-side from
+`doctor_slots`** (never trusted from the client). It then shows up in the
+patient's Payment History and on the doctor's appointments card exactly
+like an in-app offline payment, ready for the clinic to mark
+Paid/Refunded. Recording the payment is non-fatal and never fails a
+booking. The booking page surfaces it too: the **success card** shows a
+fee chip (e.g. `💵 ₹800 · Offline (Clinic)`) right after booking, and the
+**web history** accordion adds a **Fee** row per booking from the payment
+summary the `history` endpoint now attaches — so the patient always sees
+what they owe and what the clinic settled.
 
-**Who the patient pays** — each clinic can set its **own receiving UPI
-VPA** (the `upi_id` field on its `doctors` row, editable from the doctor
-profile). When set, it overrides the app-wide default and is surfaced at
-every step of the online-pay flow so the patient sees the recipient
-before paying:
+## Video / Tele Consultations (Google Meet)
 
-1. **Payment method sheet** — the "Consultation Payment" bottom sheet
-   that opens for Tele/Video bookings shows a **`Pay to: clinic@okhdfcbank`**
-   pill in its header, right under the consultation type + fee.
-2. **UPI app picker** — before the patient taps an app, the picker shows
-   a payee badge with the clinic name and VPA
-   (**`Dr. Name (clinic@okhdfcbank)`**).
-3. **UPI intent & record** — the `upi_india` intent is addressed
-   to the doctor's VPA (with the doctor's name as the receiver), and the
-   recorded `payments` row carries it as `upi_id`.
+**VIDEO and TELE (audio) consultations** have a **Join Video Call** button in
+the appointment details sheet (both the patient's My Appointments and the
+doctor's Appointments tab — they share the sheet). It starts the meeting
+through the vendored **`google_meet_sdk`** (`third_party/google_meet_sdk/`):
 
-The `upi_india` package is **vendored** at `third_party/upi_india/` (a
-path dependency in `pubspec.yaml`): upstream 3.0.1 carries a dead import
-of `PluginRegistry.Registrar` (removed in Flutter 3.35+) that breaks the
-Android build, and its module predates AGP 8's `namespace` requirement.
-The vendored copy patches both; no other code changes.
+1. **Google Sign-In** — the user picks their Google account (requests the
+   Calendar scopes the SDK needs).
+2. **Calendar event with a Meet conference** is created on their primary
+   calendar (title = consultation type + doctor, window = the booked slot
+   or now→+30 min).
+3. The returned `meet.google.com/<conferenceId>` link **opens externally**
+   in the browser / Google Meet app — the SDK has no in-app meeting view,
+   so joining always leaves the app.
 
-Online Pay (UPI) is only offered when the booked doctor has set their
-own VPA (`doctors.upi_id`, edited from the doctor profile's UPI Payment
-ID card) — there is deliberately **no app-wide fallback VPA**: a
-placeholder address cannot receive money, so when a doctor has no UPI ID
-the patient pays at the clinic instead.
+**Setup** (outside the repo):
+- Google Calendar API enabled in GCP, Firebase Auth with **Google Sign-In**
+  enabled, and the app's SHA-1 registered on the Firebase Android app.
+- The OAuth **web client ID** (from `android/app/google-services.json`,
+  `oauth_client` with `client_type` 3) is wired both as the
+  `clientId` meta-data in `AndroidManifest.xml` and in code at
+  `lib/services/meet_consult_service_io.dart` — they must stay in sync.
 
-> **Note:** intent-based UPI has no server-side verification, so only a
-> `success` status is trusted as paid. A `submitted` (unconfirmed)
-> payment does **not** book the appointment — it is treated as
-> not-paid until the clinic confirms separately. For production-grade
-> payment verification, swap `UpiPaymentService` for a gateway SDK
-> (Razorpay/PhonePe) that returns a server-verifiable transaction id.
+**Vendored** (same pattern as `quantupi`): upstream `google_meet_sdk`
+0.0.3 pins `http ^0.13.5` and a Dart `<3.0.0` SDK, so it cannot resolve
+against this project (http 1.x, Dart 3.10); the vendored copy raises the
+constraints, upgrades `google_sign_in` to 7.x (singleton + `authenticate`
+API), and replaces the fragile manifest read with a settable clientId.
+On **web** the SDK can't run (Google Sign-In needs native config), so the
+web build only opens a meeting link already stored on the appointment —
+meetings themselves must be started from the mobile app. The old
+fixed-room / in-app-WebView logic is completely removed.
 
 ## One Active Booking Per Doctor
 
@@ -300,8 +335,8 @@ The rule is enforced in **three layers** (same pattern as the slot rule):
    (`supabase/migrations/20260813000001_enforce_one_active_booking_per_doctor.sql`,
    applied by `deploy_booking.py`) is the final authority: it rejects any
    INSERT that would give a patient a second active booking with the SAME
-   doctor — so even two devices booking in parallel (e.g. while a UPI
-   payment is in flight) can't slip through. Reschedules (UPDATEs) and
+   doctor — so even two devices booking in parallel can't slip through.
+   Reschedules (UPDATEs) and
    Cancel/Complete status changes are never blocked. The app and Edge
    Function both translate the trigger's error marker back into the
    friendly gate message.
@@ -344,37 +379,6 @@ Notification Center history row, new `appointment_rescheduled` event), and
 doctors can opt out of reschedule alerts from **Profile → Notification
 Settings** — the "Reschedules" toggle next to the existing
 bookings/cancellations/status ones.
-
-## Google Meet Video Calls (free, no API keys)
-
-**VIDEO** consultations get a free Google Meet integration on both sides:
-
-- **Patient** (`My Appointments`) and **doctor** (Appointments tab) each see
-  a **Video Call** chip on the appointment card and a **Video Call** button
-  in the details sheet — only for `video` consultations (Tele is a phone
-  call, Clinic is in person).
-- Tapping it opens the shared **video-call sheet** (`lib/widgets/video_call_sheet.dart`):
-  - **Join Video Call** — opens the saved meeting link in the browser /
-    Google Meet app (`url_launcher`, `LaunchMode.externalApplication`).
-  - **Start New Meeting** — opens `https://meet.new` so **Google generates
-    a real link** (a made-up code like `abc-defg-hij` shows "invalid
-    meeting" — Google only accepts meet-generated codes, so the app never
-    invents one), then prompts to paste the link back.
-  - **Enter / Paste Link** — manual entry with a "Paste from clipboard"
-    shortcut (the user just copied it from meet.new).
-  - **Copy Link** and **Send to Patient/Doctor** — share the link over
-    **WhatsApp or SMS** with a pre-filled invite (the other party's number
-    is the appointment's stored patient/doctor phone), so both sides join
-    the same meeting.
-- The saved link is stored on the appointment (`appointments.meet_link`,
-  migration `supabase/migrations/20260814000004_add_meet_link.sql`);
-  either side can save/replace it, and the card + sheet update in place.
-  Guests join without a Google account — whoever starts the meeting
-  creates the link.
-
-Zero external setup: no Google Cloud project, no API keys, no OAuth, no
-WebView (Google Meet doesn't work reliably embedded in WebViews anyway —
-launching the browser/Meet app is the recommended approach).
 
 ## Payment History (filter bar)
 

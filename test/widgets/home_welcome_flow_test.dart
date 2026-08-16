@@ -92,9 +92,9 @@ Future<_FakeTtsService> _pumpHomeScreen(
   await tester.pumpWidget(
     MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
   );
-  await tester.pump(const Duration(milliseconds: 1500));
+  await tester.pump(const Duration(milliseconds: 3000));
   // The welcome flow is deliberately delayed: the avatar video starts
-  // 1.5s after the screen opens, and the greeting audio starts together
+  // 3s after the screen opens, and the greeting audio starts together
   // with it ("With the video" — welcomeGreetingAudioDelay is 0 ms).
   // Advance past both so every test below works with the greeting in
   // flight.
@@ -155,7 +155,7 @@ void main() {
     });
 
     testWidgets(
-      'the avatar video and the greeting start together at 1.5s',
+      'the avatar video and the greeting start together at 3s',
       (tester) async {
         final vc = _ReadyVoiceController(initialized: false);
         Get.put<VoiceController>(vc, permanent: true);
@@ -166,11 +166,11 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
         );
-        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump(const Duration(milliseconds: 1000));
 
-        // Before the 1.5s mark the avatar is still paused + silent.
+        // Before the 3s mark the avatar is still paused + silent.
         expect(fakeTts.speakCalls, 0);
-        await tester.pump(const Duration(milliseconds: 900)); // t=1.4s
+        await tester.pump(const Duration(milliseconds: 1900)); // t=2.9s
         expect(fakeTts.speakCalls, 0);
         expect(
           tester
@@ -179,9 +179,9 @@ void main() {
           isFalse,
         );
 
-        // Crossing the 1.5s threshold starts the avatar video AND the
+        // Crossing the 3s threshold starts the avatar video AND the
         // greeting voice — the timing is fixed to "With the video".
-        await tester.pump(const Duration(milliseconds: 200)); // t=1.6s
+        await tester.pump(const Duration(milliseconds: 200)); // t=3.1s
         expect(
           tester
               .widget<HealthAssistantVideo>(find.byType(HealthAssistantVideo))
@@ -214,9 +214,9 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
         );
-        await tester.pump(const Duration(milliseconds: 1600)); // t=1.6s
+        await tester.pump(const Duration(milliseconds: 3100)); // t=3.1s
 
-        // The avatar video started at 1.5s and the greeting spoke right
+        // The avatar video started at 3s and the greeting spoke right
         // along with it — the stale 2s stagger was ignored.
         expect(
           tester
@@ -247,8 +247,8 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
         );
-        // Crossing the 1.5s video start: voice speaks immediately.
-        await tester.pump(const Duration(milliseconds: 1600));
+        // Crossing the 3s video start: voice speaks immediately.
+        await tester.pump(const Duration(milliseconds: 3100));
         expect(fakeTts.speakCalls, 1);
 
         await _settleAnimations(tester);
@@ -267,13 +267,13 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
         );
-        // The user starts the mic before the 1.5s welcome trigger.
+        // The user starts the mic before the 3s welcome trigger.
         vc.isListening.value = true;
         // Past the welcome trigger AND the greeting delay — the flow
-        // bailed at 1.5s, so neither the video nor the delayed voice
+        // bailed at 3s, so neither the video nor the delayed voice
         // ever fires.
-        await tester.pump(const Duration(milliseconds: 1600)); // t=1.6s
-        await tester.pump(const Duration(milliseconds: 1100)); // t=2.7s
+        await tester.pump(const Duration(milliseconds: 3100)); // t=3.1s
+        await tester.pump(const Duration(milliseconds: 500)); // t=3.6s
 
         // The welcome flow bails out — the avatar never plays and no
         // greeting speech happens.
@@ -308,9 +308,9 @@ void main() {
         );
 
         // Run the auto-welcome to completion so the avatar is left paused:
-        // video + greeting start together at 1.5s, then complete.
-        await tester.pump(const Duration(milliseconds: 1600));
-        await tester.pump(const Duration(milliseconds: 1100)); // t=2.7s
+        // video + greeting start together at 3s, then complete.
+        await tester.pump(const Duration(milliseconds: 3100));
+        await tester.pump(const Duration(milliseconds: 500)); // t=3.6s
         expect(fakeTts.speakCalls, 1); // auto-welcome greeting
         expect(vc.autoStartCalls, 0); // mic waits for the greeting to end
         fakeTts.lastOnComplete?.call();
@@ -532,9 +532,9 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
       );
-      // Well past the 1.5s welcome delay — no video, no greeting audio,
+      // Well past the 3s welcome delay — no video, no greeting audio,
       // no auto-started mic.
-      await tester.pump(const Duration(milliseconds: 1500));
+      await tester.pump(const Duration(milliseconds: 3000));
       await tester.pump(const Duration(seconds: 5));
 
       expect(fakeTts.speakCalls, 0);
@@ -563,7 +563,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
       );
-      await tester.pump(const Duration(milliseconds: 1500));
+      await tester.pump(const Duration(milliseconds: 3000));
       // Well past the welcome delay — the avatar stays quiet: no
       // greeting audio, no auto-started mic.
       await tester.pump(const Duration(seconds: 5));

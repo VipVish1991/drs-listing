@@ -84,6 +84,15 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="@string/google_maps_key" />
 
+        <!-- Google Meet consultations (google_meet_sdk / Google Sign-In):
+             OAuth web client ID from android/app/google-services.json
+             (oauth_client with client_type 3). Also set in code at
+             lib/services/meet_consult_service_io.dart so the vendored SDK
+             doesn't need to read the manifest. -->
+        <meta-data
+            android:name="clientId"
+            android:value="450216527653-nptvtf6lkspa65sgmh358qm7mjq3ccog.apps.googleusercontent.com" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

@@ -15,7 +15,6 @@ import '../../widgets/booking_block_banner.dart';
 import '../../widgets/appointment_details_sheet.dart';
 import '../../widgets/appointment_search.dart';
 import '../../widgets/pending_reschedule_confirm.dart';
-import '../../widgets/video_call_sheet.dart';
 import '../../routes/app_routes.dart';
 
 class AppointmentHistoryScreen extends StatefulWidget {
@@ -107,34 +106,11 @@ class _AppointmentHistoryScreenState extends State<AppointmentHistoryScreen> {
       // Fee/payment recorded for this appointment — the patient sees the
       // consultation fee, how they paid and what's still outstanding.
       payment: _paymentFor(a),
+      // Persist a newly created Meet link so the doctor joins the same
+      // room on their side.
+      onSaveMeetLink: (link) =>
+          _controller.saveMeetLink(a.appointmentId, link),
       footerActions: [
-        // Google Meet video call — only for VIDEO consultations (Tele is
-        // a phone call, Clinic is in person).
-        if (a.isVideoConsultation)
-          Container(
-            margin: const EdgeInsets.only(top: 8),
-            width: double.infinity,
-            height: 50,
-            child: OutlinedButton.icon(
-              key: const ValueKey('patient_appointment_details_video_call'),
-              onPressed: () {
-                Get.back();
-                _openVideoCall(a);
-              },
-              icon: const Icon(Icons.videocam_rounded, size: 18),
-              label: const Text(
-                'Video Call',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.info,
-                side: BorderSide(color: AppColors.info.withAlpha(80)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-            ),
-          ),
         // Reschedule — same entry point as the card chip, reachable from
         // inside the details sheet too.
         if (canReschedule)
@@ -210,18 +186,6 @@ class _AppointmentHistoryScreenState extends State<AppointmentHistoryScreen> {
   /// not-yet-confirmed appointment to a new slot needs an explicit
   /// acknowledgement. Confirmed rows navigate straight to the reschedule
   /// screen.
-  /// Opens the shared Google Meet video-call sheet for a video consultation.
-  /// The patient saves the link (stored on the appointment, so the doctor
-  /// can join) and can share it to the doctor's phone via WhatsApp/SMS.
-  void _openVideoCall(AppointmentModel a) {
-    VideoCallSheet.show(
-      appointment: a,
-      sharePhone: a.callNumber,
-      isDoctor: false,
-      onSaveLink: (link) => _controller.saveMeetLink(a.appointmentId, link),
-    );
-  }
-
   void _openReschedule(AppointmentModel appointment) {
     confirmIfPendingReschedule(
       appointment,
@@ -366,10 +330,6 @@ class _AppointmentHistoryScreenState extends State<AppointmentHistoryScreen> {
                           appointment: appointment,
                           displayStatus: displayStatus,
                           onTap: () => _showAppointmentDetails(appointment),
-                          onCall: appointment.callNumber != null
-                              ? () =>
-                                    LaunchService.phone(appointment.callNumber)
-                              : null,
                           onMap: appointment.mapLocation != null
                               ? () => LaunchService.mapFromLocation(
                                   appointment.mapLocation,
@@ -377,9 +337,6 @@ class _AppointmentHistoryScreenState extends State<AppointmentHistoryScreen> {
                               : null,
                           onCancel: displayStatus == 'Upcoming'
                               ? () => _cancelAppointment(appointment)
-                              : null,
-                          onVideoCall: appointment.isVideoConsultation
-                              ? () => _openVideoCall(appointment)
                               : null,
                         )
                         .animate()

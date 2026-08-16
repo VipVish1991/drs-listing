@@ -61,6 +61,11 @@ class DoctorSearchController extends GetxController {
     String? specialization,
     String? query,
   }) async {
+    // A NEW search must never be served stale cached results — drop the
+    // previously cached search entries so this request hits the live
+    // Google API (fresh listings every time). Doctor-detail cache is kept.
+    await _placesService.clearSearchCache();
+
     isLoading.value = true;
     errorMessage.value = '';
     doctors.clear();

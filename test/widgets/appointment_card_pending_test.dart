@@ -184,9 +184,8 @@ void main() {
               appointment: appointment,
               displayStatus: AppointmentStatus.upcoming,
               onTap: () {},
-              // Exercise the widest action set — Call + Map + Cancel flow
-              // inside the Wrap instead of overflowing the card edge.
-              onCall: () {},
+              // Exercise the widest action set — Map + Cancel flow inside
+              // the Wrap instead of overflowing the card edge.
               onMap: () {},
               onCancel: () {},
             ),
@@ -216,19 +215,18 @@ void main() {
       expect(find.text('9876543210'), findsNothing);
       expect(find.text('Patient: Vippp'), findsNothing);
       expect(find.text('Upcoming'), findsOneWidget);
-      // All three action chips render and fit.
-      expect(find.text('Call'), findsOneWidget);
+      // All action chips render and fit.
       expect(find.text('Map'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);
     },
   );
 
-  testWidgets('Consultation row and Call/Map chips appear only when known', (
+  testWidgets('Consultation row and Map chips appear only when known', (
     tester,
   ) async {
     // A card with a stored consultation type shows the full-width
     // Consultation row (the doctor's phone moved into the details sheet),
-    // but no Call/Map chips — those render only when the caller provides
+    // but no Map/Cancel chips — those render only when the caller provides
     // the callbacks.
     final withType = appointmentBasic(
       appointmentId: 'APT2010',
@@ -242,7 +240,6 @@ void main() {
     await tester.pump();
     expect(find.text('Consultation'), findsOneWidget);
     expect(find.text('Video Consultation'), findsOneWidget);
-    expect(find.text('Call'), findsNothing);
     expect(find.text('Map'), findsNothing);
     expect(find.text('Cancel'), findsNothing);
 

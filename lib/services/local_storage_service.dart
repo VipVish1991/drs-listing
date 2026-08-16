@@ -205,6 +205,20 @@ class LocalStorageService {
     }
   }
 
+  /// Removes only the cached SEARCH results (keys prefixed
+  /// `places_cache_search_`), keeping the doctor-detail cache intact — a
+  /// new search must always hit the live Google API, but previously
+  /// fetched doctor profiles stay cached to save calls.
+  Future<void> clearSearchCache() async {
+    final keys = _prefs?.getKeys() ?? {};
+    final searchPrefix = '${AppConstants.placesCachePrefix}search_';
+    for (final key in keys) {
+      if (key.startsWith(searchPrefix)) {
+        await _prefs?.remove(key);
+      }
+    }
+  }
+
   // ── Onboarding (first interaction) flag ──
 
   Future<void> setOnboardingDone() async {

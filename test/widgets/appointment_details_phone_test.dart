@@ -1,11 +1,63 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher_platform_interface/link.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 import 'package:DrsListing/config/theme.dart';
 import 'package:DrsListing/models/appointment_model.dart';
 import 'package:DrsListing/models/payment_model.dart';
+import 'package:DrsListing/services/meet_consult_service_io.dart';
 import 'package:DrsListing/widgets/appointment_details_sheet.dart';
+
+/// Records url_launcher calls so the Join button's external open can be
+/// asserted.
+class _SheetFakeUrlLauncher extends UrlLauncherPlatform {
+  final List<String> launchCalls = [];
+
+  @override
+  LinkDelegate? get linkDelegate => null;
+
+  @override
+  Future<bool> canLaunch(String url) async => true;
+
+  @override
+  Future<bool> launch(
+    String url, {
+    required bool useSafariVC,
+    required bool useWebView,
+    required bool enableJavaScript,
+    required bool enableDomStorage,
+    required bool universalLinksOnly,
+    required Map<String, String> headers,
+    String? webOnlyWindowName,
+  }) async {
+    launchCalls.add(url);
+    return true;
+  }
+}
+
+/// Fake of the Google API surface so the Join button can run the full
+/// sign-in → event → link flow without platform channels.
+class _SheetFakeMeetGateway implements MeetFlowGateway {
+  Map<String, String>? createEventResult = const {
+    'id': 'evt_1',
+    'link': 'https://meet.google.com/created-room-1',
+  };
+
+  @override
+  Future<bool> signIn(BuildContext context) async => true;
+
+  @override
+  Future<Map<String, String>?> createEvent({
+    required String title,
+    required String description,
+    required DateTime startTime,
+    required DateTime endTime,
+  }) async {
+    return createEventResult;
+  }
+}
 
 /// Pumps a host screen with a button that opens the details sheet for
 /// [appointment], passing [phoneNumber] and [payment] through (as the
@@ -15,6 +67,7 @@ Future<void> _openSheet(
   AppointmentModel appointment, {
   String? phoneNumber,
   PaymentModel? payment,
+  Future<bool> Function(String link)? onSaveMeetLink,
 }) async {
   await tester.pumpWidget(
     GetMaterialApp(
@@ -29,6 +82,7 @@ Future<void> _openSheet(
                 headerName: appointment.patientName ?? 'Patient',
                 phoneNumber: phoneNumber,
                 payment: payment,
+                onSaveMeetLink: onSaveMeetLink,
               ),
               child: const Text('open sheet'),
             ),
@@ -170,7 +224,209 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Video Consultation'), findsOneWidget);
-      expect(find.byIcon(Icons.videocam_rounded), findsOneWidget);
+      // The chip's icon (the Join Video Call button below adds its own).
+      expect(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey('details_sheet_consultation_chip'),
+          ),
+          matching: find.byIcon(Icons.videocam_rounded),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('video consultation shows the Join Video Call button',
+        (tester) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_BTN_1',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'video',
+      );
+
+      await _openSheet(tester, appointment);
+
+      // Remote consultations start the Meet consultation (Google sign-in →
+      // calendar event → link opens externally).
+      expect(
+        find.byKey(const ValueKey('join_video_call')),
+        findsOneWidget,
+      );
+      expect(find.text('Join Video Call'), findsOneWidget);
+      expect(find.byIcon(Icons.videocam_rounded), findsWidgets);
+    });
+
+    testWidgets('tele (audio) consultation shows the Join Video Call button',
+        (tester) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_BTN_2',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'tele',
+      );
+
+      await _openSheet(tester, appointment);
+
+      expect(
+        find.byKey(const ValueKey('join_video_call')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('in-clinic visits hide the Join Video Call button', (
+      tester,
+    ) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_BTN_3',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'clinic',
+      );
+
+      await _openSheet(tester, appointment);
+
+      expect(
+        find.byKey(const ValueKey('join_video_call')),
+        findsNothing,
+      );
+      expect(find.text('Join Video Call'), findsNothing);
+    });
+
+    testWidgets('legacy rows without a type hide the Join Video Call button',
+        (tester) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_BTN_4',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+      );
+
+      await _openSheet(tester, appointment);
+
+      expect(
+        find.byKey(const ValueKey('join_video_call')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('a stored Meet link surfaces the shared room under the button',
+        (tester) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_LINK_1',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'video',
+        // The OTHER side already started the meeting — this side must see
+        // and join the same room.
+        meetLink: 'https://meet.google.com/abc-def-ghi',
+      );
+
+      await _openSheet(tester, appointment);
+
+      expect(
+        find.byKey(const ValueKey('join_video_call')),
+        findsOneWidget,
+      );
+      // The shared room is surfaced so both sides see they're joining the
+      // same meeting.
+      expect(find.text('https://meet.google.com/abc-def-ghi'), findsOneWidget);
+    });
+
+    testWidgets('no stored link means no shared-room row', (tester) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_LINK_2',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'video',
+      );
+
+      await _openSheet(tester, appointment);
+
+      expect(
+        find.byKey(const ValueKey('join_video_call')),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.link_rounded), findsNothing);
+    });
+
+    testWidgets('tapping Join on a fresh appointment creates the meeting, '
+        'opens the link and saves it (both sides join the same room)',
+        (tester) async {
+      // Fake the Google APIs (the VM test resolves the io implementation)
+      // and the url launcher so the whole button flow runs end-to-end.
+      final savedLinks = <String>[];
+      final urlLauncher = _SheetFakeUrlLauncher();
+      UrlLauncherPlatform.instance = urlLauncher;
+      meetFlowGateway = _SheetFakeMeetGateway();
+      addTearDown(() => meetFlowGateway = SdkMeetFlowGateway());
+
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_CREATE_1',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'video',
+      );
+
+      await _openSheet(
+        tester,
+        appointment,
+        onSaveMeetLink: (link) async {
+          savedLinks.add(link);
+          return true;
+        },
+      );
+
+      await tester.tap(find.byKey(const ValueKey('join_video_call')));
+      await tester.pumpAndSettle();
+
+      // The flow ran: the newly created room opened externally AND was
+      // persisted via the onSaveMeetLink callback (wired to the
+      // controller's saveMeetLink on both screens), so the other side
+      // joins the same room.
+      expect(urlLauncher.launchCalls, ['https://meet.google.com/created-room-1']);
+      expect(savedLinks, ['https://meet.google.com/created-room-1']);
+    });
+
+    testWidgets('tapping Join when a link is already stored reuses the '
+        'saved room (no new event, no re-save needed)', (tester) async {
+      final savedLinks = <String>[];
+      final urlLauncher = _SheetFakeUrlLauncher();
+      UrlLauncherPlatform.instance = urlLauncher;
+      meetFlowGateway = _SheetFakeMeetGateway();
+      addTearDown(() => meetFlowGateway = SdkMeetFlowGateway());
+
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_REUSE_1',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'tele',
+        meetLink: 'https://meet.google.com/abc-def-ghi',
+      );
+
+      await _openSheet(
+        tester,
+        appointment,
+        onSaveMeetLink: (link) async {
+          savedLinks.add(link);
+          return true;
+        },
+      );
+
+      await tester.tap(find.byKey(const ValueKey('join_video_call')));
+      await tester.pumpAndSettle();
+
+      // The stored room opened directly (no Google sign-in — the fake
+      // gateway's createEvent would return a different link otherwise).
+      expect(urlLauncher.launchCalls, ['https://meet.google.com/abc-def-ghi']);
+      expect(savedLinks, ['https://meet.google.com/abc-def-ghi']);
     });
 
     testWidgets('in-clinic type chip uses the storefront icon', (tester) async {
@@ -415,4 +671,5 @@ void main() {
       expect(find.textContaining('₹'), findsNothing);
     });
   });
+
 }

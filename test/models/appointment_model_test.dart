@@ -30,4 +30,45 @@ void main() {
       expect(make(date: '08/08/2026').displayDate, '08/08/2026');
     });
   });
+
+  group('AppointmentModel.meetLink', () {
+    test('fromJson reads meet_link and toJson round-trips it', () {
+      final appointment = AppointmentModel.fromJson({
+        'appointment_id': 'APT1',
+        'meet_link': 'https://meet.google.com/abc-def-ghi',
+      });
+
+      expect(appointment.meetLink, 'https://meet.google.com/abc-def-ghi');
+      expect(
+        appointment.toJson()['meet_link'],
+        'https://meet.google.com/abc-def-ghi',
+      );
+    });
+
+    test('null/empty meet_link is omitted from toJson and read as null', () {
+      final appointment = AppointmentModel.fromJson({
+        'appointment_id': 'APT2',
+      });
+
+      expect(appointment.meetLink, isNull);
+      expect(appointment.toJson().containsKey('meet_link'), isFalse);
+    });
+
+    test('copyWith updates the meet link (in-place save pattern)', () {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT3',
+      );
+
+      final withLink = appointment.copyWith(
+        meetLink: 'https://meet.google.com/xyz-uvw-123',
+      );
+      expect(withLink.meetLink, 'https://meet.google.com/xyz-uvw-123');
+      // Other fields are untouched.
+      expect(withLink.appointmentId, 'APT3');
+
+      // Null keeps the existing value (copyWith's nullable-field contract).
+      final unchanged = withLink.copyWith(meetLink: null);
+      expect(unchanged.meetLink, 'https://meet.google.com/xyz-uvw-123');
+    });
+  });
 }

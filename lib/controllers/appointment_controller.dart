@@ -261,10 +261,10 @@ class AppointmentController extends GetxController {
   /// trigger) rejects an insert with the one-active-booking-per-doctor
   /// marker — i.e. the patient booked on another device (or their earlier
   /// booking landed) in the window between the screen's pre-book check and
-  /// the actual insert (a UPI payment can take minutes). The booking
-  /// screen surfaces this instead of the generic failure snackbar, then
-  /// clears it. Null when no gate rejection has happened. Plain field (not
-  /// reactive) — the booking screen is its only consumer.
+  /// the actual insert. The booking screen surfaces this instead of the
+  /// generic failure snackbar, then clears it. Null when no gate rejection
+  /// has happened. Plain field (not reactive) — the booking screen is its
+  /// only consumer.
   String? serverBookingBlockMessage;
 
   /// Maps a booking-insert exception to the friendly per-doctor gate
@@ -325,15 +325,12 @@ class AppointmentController extends GetxController {
 
   /// Book an appointment, optionally recording the consultation payment.
   ///
-  /// [payment] is built by the booking screen AFTER the UPI/offline choice:
-  ///   * online UPI success → status 'Paid', method 'online', txn id set;
-  ///   * online UPI submitted → status 'Pending', method 'online' (awaits
-  ///     clinic confirmation);
-  ///   * offline → status 'Pending', method 'offline' (pay at clinic).
-  /// The payment row's `appointment_id` is filled with the generated
-  /// appointment id so the history links both tables. A payment insert
-  /// failure never fails the booking itself (the appointment already
-  /// exists and the patient can pay later / at the clinic).
+  /// [payment] is an offline "pay at clinic" record (status 'Pending',
+  /// method 'offline') built by the booking screen. The payment row's
+  /// `appointment_id` is filled with the generated appointment id so the
+  /// history links both tables. A payment insert failure never fails the
+  /// booking itself (the appointment already exists and the patient can
+  /// pay later / at the clinic).
   Future<bool> bookAppointment(
     DoctorModel doctor, {
     PaymentModel? payment,
@@ -391,7 +388,7 @@ class AppointmentController extends GetxController {
 
       await _supabase.createAppointment(data);
 
-      // Record the consultation payment (online UPI / offline pay-at-clinic)
+      // Record the consultation payment (offline pay-at-clinic)
       // linked to this appointment. Failure is non-fatal — the appointment
       // is booked either way.
       if (payment != null) {
@@ -536,10 +533,11 @@ class AppointmentController extends GetxController {
     } catch (_) {}
   }
 
-  /// Save (or clear, when [link] is null) the Google Meet URL for a video
-  /// consultation. Updates the reactive list IN PLACE on success so the
-  /// card / details sheet reflect the link immediately (no full reload).
-  /// Returns `true` only when the write actually landed server-side.
+  /// Save (or clear, when [link] is null) the shared Google Meet URL for
+  /// a video/tele consultation. Updates the reactive list IN PLACE on
+  /// success so the card / details sheet reflect the link immediately (no
+  /// full reload). Returns `true` only when the write actually landed
+  /// server-side.
   Future<bool> saveMeetLink(String appointmentId, String? link) async {
     final userId = _authController.currentUser.value?.id;
     if (userId == null) return false;

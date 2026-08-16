@@ -67,7 +67,7 @@ class _HealthAssistantVideoState extends State<HealthAssistantVideo> {
     super.didUpdateWidget(oldWidget);
 
     // Start/pause the video when autoPlay flips (the welcome-flow delay
-    // on the home screen waits ~1.5s before the avatar video kicks in).
+    // on the home screen waits ~3s before the avatar video kicks in).
     if (widget.autoPlay != oldWidget.autoPlay) {
       final controller = _controller;
       if (controller != null && controller.value.isInitialized) {

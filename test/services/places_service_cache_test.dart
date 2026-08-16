@@ -197,6 +197,67 @@ void main() {
       expect(other.doctors, hasLength(1));
     });
 
+    test('clearSearchCache removes search entries but keeps doctor details',
+        () async {
+      // Seed a search-result entry and a doctor-detail entry.
+      final searchKey = nearbyHealthcareCacheKey(
+        keyword: 'clinic',
+        latitude: 12.34,
+        longitude: 56.78,
+        radius: 5000,
+      );
+      final detailKey = doctorDetailCacheKey('detail_keep');
+      final storage = LocalStorageService();
+      await storage.savePlacesCache(
+        searchKey,
+        jsonEncode([
+          doctorBasic(placeId: 's1', name: 'Search Result').toJson(),
+        ]),
+      );
+      await storage.savePlacesCache(
+        detailKey,
+        jsonEncode(doctorBasic(placeId: 'd1', name: 'Detail Doc').toJson()),
+      );
+
+      await PlacesService().clearSearchCache();
+
+      // Search entry gone — a new search must hit the live API.
+      expect(storage.getPlacesCache(searchKey), isNull);
+      // Detail entry survives — doctor profiles stay cached.
+      expect(storage.getPlacesCache(detailKey), isNotNull);
+    });
+
+    test('clearSearchCache makes the next identical search hit the API',
+        () async {
+      final mock = _textSearchMock(
+        results: [placesResultJson(placeId: 'hit_1', name: 'Hit Clinic')],
+      );
+      PlacesService().setClientForTesting(mock.client);
+
+      // Warm the cache.
+      await PlacesService().searchNearbyHealthcare(
+        keyword: 'clinic',
+        latitude: 12.34,
+        longitude: 56.78,
+        radius: 5000,
+      );
+      expect(mock.calls(), 1);
+
+      // Clear the search cache (as a new search does) → the identical
+      // request must call the API again instead of serving the cache.
+      await PlacesService().clearSearchCache();
+      final second = await PlacesService().searchNearbyHealthcare(
+        keyword: 'clinic',
+        latitude: 12.34,
+        longitude: 56.78,
+        radius: 5000,
+      );
+
+      expect(mock.calls(), 2); // fresh API call after the clear
+      expect(second.doctors, hasLength(1));
+      expect(second.doctors.first.placeId, 'hit_1');
+    });
+
     test('stale cached entries older than the TTL are re-fetched', () async {
       // Seed the cache with an entry whose saved_at is 25 hours old
       // (TTL is 24h), stored in the same shape _writeSearchCache uses.

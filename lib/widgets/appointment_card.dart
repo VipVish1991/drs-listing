@@ -13,10 +13,10 @@ import 'appointment_info_card.dart';
 /// status-colored accent bar, avatar + name + status-below header, the
 /// 2-column info grid (Date / Time), a full-width Consultation row where
 /// the doctor's phone used to be (the phone itself lives in the details
-/// sheet — Call is still one tap away there), the prescription "Click"
-/// row and the Call / Map / Cancel action chips (each only when the
-/// caller provides its callback). Rescheduling is intentionally NOT a
-/// card chip anymore — the details sheet is its single entry point.
+/// sheet), the prescription "Click" row and the Map / Cancel action
+/// chips (each only when the caller provides its callback).
+/// Rescheduling is intentionally NOT a card chip anymore — the details
+/// sheet is its single entry point.
 class AppointmentCard extends StatelessWidget {
   final AppointmentModel appointment;
 
@@ -25,22 +25,16 @@ class AppointmentCard extends StatelessWidget {
   final String displayStatus;
 
   final VoidCallback onTap;
-  final VoidCallback? onCall;
   final VoidCallback? onMap;
   final VoidCallback? onCancel;
-
-  /// Opens the Google Meet video-call sheet (video consultations only).
-  final VoidCallback? onVideoCall;
 
   const AppointmentCard({
     super.key,
     required this.appointment,
     required this.displayStatus,
     required this.onTap,
-    this.onCall,
     this.onMap,
     this.onCancel,
-    this.onVideoCall,
   });
 
   // Same status color/icon mapping as the doctor side (single source of
@@ -112,31 +106,12 @@ class AppointmentCard extends StatelessWidget {
         extraRow: displayStatus == AppointmentStatus.pending
             ? _buildPendingBanner(statusColor)
             : null,
-        actions:
-            (onCall != null ||
-                    onMap != null ||
-                    onCancel != null ||
-                    onVideoCall != null)
+        actions: (onMap != null || onCancel != null)
             ? Wrap(
                 alignment: WrapAlignment.end,
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  // Google Meet video call — video consultations only.
-                  if (onVideoCall != null)
-                    AppActionChip(
-                      icon: Icons.videocam_rounded,
-                      label: 'Video Call',
-                      color: AppColors.info,
-                      onTap: onVideoCall!,
-                    ),
-                  if (onCall != null)
-                    AppActionChip(
-                      icon: Icons.call_rounded,
-                      label: 'Call',
-                      color: AppColors.success,
-                      onTap: onCall!,
-                    ),
                   if (onMap != null)
                     AppActionChip(
                       icon: Icons.map_rounded,

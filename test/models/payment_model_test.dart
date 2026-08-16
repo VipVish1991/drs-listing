@@ -19,6 +19,11 @@ void main() {
         currency: 'INR',
         transactionId: 'TXN123456',
         upiId: 'drslisting@upi',
+        approvalRefNo: 'REF42',
+        responseCode: '00',
+        txnRef: 'APT123',
+        upiAppId: 'com.phonepe.app',
+        rawResponse: '?txnId=TXN123456&Status=SUCCESS&txnRef=APT123',
         paidAt: DateTime.utc(2026, 8, 9, 10, 30),
       );
 
@@ -35,6 +40,11 @@ void main() {
       expect(json['currency'], 'INR');
       expect(json['transaction_id'], 'TXN123456');
       expect(json['upi_id'], 'drslisting@upi');
+      expect(json['approval_ref_no'], 'REF42');
+      expect(json['response_code'], '00');
+      expect(json['txn_ref'], 'APT123');
+      expect(json['upi_app_id'], 'com.phonepe.app');
+      expect(json['raw_response'], '?txnId=TXN123456&Status=SUCCESS&txnRef=APT123');
       expect(json['paid_at'], isNotNull);
       // id / created_at are DB-generated — never sent.
       expect(json.containsKey('id'), isFalse);
@@ -51,6 +61,11 @@ void main() {
       expect(restored.amount, 800);
       expect(restored.transactionId, 'TXN123456');
       expect(restored.upiId, 'drslisting@upi');
+      expect(restored.approvalRefNo, 'REF42');
+      expect(restored.responseCode, '00');
+      expect(restored.txnRef, 'APT123');
+      expect(restored.upiAppId, 'com.phonepe.app');
+      expect(restored.rawResponse, '?txnId=TXN123456&Status=SUCCESS&txnRef=APT123');
       expect(restored.isPaid, isTrue);
     });
 
@@ -148,6 +163,24 @@ void main() {
       expect(finalPayment.paymentStatus, 'Paid');
       // isPaid drives whether paid_at gets set by the controller.
       expect(finalPayment.isPaid, isTrue);
+    });
+
+    test('parses TIMESTAMPTZ strings into LOCAL time (UTC → local)', () {
+      // PostgREST returns timestamptz columns as UTC ISO strings with a
+      // Z/offset; the model must normalize to local so the card shows the
+      // user's own time (a 10:30 IST payment must NOT display 05:00).
+      final parsed = PaymentModel.fromJson({
+        'paid_at': '2026-08-06T05:00:00Z',
+        'created_at': '2026-08-06T05:00:00+00:00',
+      });
+
+      expect(parsed.paidAt, isNotNull);
+      expect(parsed.paidAt!.isUtc, isFalse);
+      expect(parsed.createdAt, isNotNull);
+      expect(parsed.createdAt!.isUtc, isFalse);
+      // The instant is preserved exactly (local conversion is a zone
+      // change, never a time shift).
+      expect(parsed.paidAt!.toUtc(), DateTime.utc(2026, 8, 6, 5, 0));
     });
   });
 }

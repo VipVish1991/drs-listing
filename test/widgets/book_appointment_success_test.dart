@@ -158,6 +158,14 @@ Future<void> _bookAppointment(WidgetTester tester) async {
   await tester.pump();
   await tester.tap(bookButton);
   await tester.pump();
+
+  // Every paid consultation (even in-clinic) now asks how to pay — pick
+  // Offline Pay to complete the booking (the test doctor has no UPI ID,
+  // so the sheet offers only the offline tile).
+  final offlineTile = find.text('Offline Pay');
+  await tester.pump(const Duration(milliseconds: 300));
+  await tester.tap(offlineTile);
+  await tester.pump();
   await tester.pump(const Duration(milliseconds: 300));
 }
 

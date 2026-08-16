@@ -95,6 +95,12 @@ class PlacesService {
     }
   }
 
+  /// Clears every cached SEARCH result so the next search always hits the
+  /// live Google API (fresh data, no stale cached listings). Doctor-detail
+  /// cache entries are deliberately kept — they don't go stale on a new
+  /// search and re-fetching them would burn API calls.
+  Future<void> clearSearchCache() => _storage.clearSearchCache();
+
   /// Persists [doctors] under [key] so future identical requests are
   /// served locally (reduces Google Places API cost).
   ///

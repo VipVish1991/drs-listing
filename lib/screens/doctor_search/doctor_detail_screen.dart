@@ -292,6 +292,14 @@ class _DoctorDetailScreenState extends State<DoctorDetailScreen> {
                       // Contact
                       _ContactCard(doctor: _doctor, isDark: isDark),
                       const SizedBox(height: 20),
+                      // UPI Payment ID — shown when the doctor has set a
+                      // receiving VPA (online consultation fees are paid
+                      // to this address in the booking flow). Hidden for
+                      // doctors without one — they collect at the clinic.
+                      if ((_doctor.upiId ?? '').trim().isNotEmpty) ...[
+                        _UpiIdCard(doctor: _doctor, isDark: isDark),
+                        const SizedBox(height: 20),
+                      ],
                       // Availability — weekly slots + unavailable dates
                       if (_unavailableRanges.isNotEmpty ||
                           _weeklySlots.any((s) => s.isEnabled)) ...[
@@ -1867,6 +1875,71 @@ class _ContactCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Read-only UPI Payment ID card for the patient-facing doctor profile:
+/// shows the clinic's receiving UPI VPA (the address online consultation
+/// fees are paid to in the booking flow). Only rendered when the doctor
+/// has set one — no VPA means the patient pays at the clinic.
+class _UpiIdCard extends StatelessWidget {
+  final DoctorModel doctor;
+  final bool isDark;
+  const _UpiIdCard({required this.doctor, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final upiId = (doctor.upiId ?? '').trim();
+    if (upiId.isEmpty) return const SizedBox.shrink();
+
+    return _SectionCard(
+      isDark: isDark,
+      header: const _SectionHeader(
+        icon: Icons.account_balance_wallet_rounded,
+        iconColor: AppColors.primary,
+        title: 'UPI Payment ID',
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withAlpha(8),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppColors.primary.withAlpha(35),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.check_circle_rounded,
+              size: 18,
+              color: AppColors.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                upiId,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : AppColors.textHeading,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Text(
+              'Pay here',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -61,8 +61,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _greetingAudioTimer;
 
   /// How long a freshly-opened home screen waits before the avatar video
-  /// kicks in (patient side, first open).
-  static const Duration _welcomeStartDelay = Duration(milliseconds: 1500);
+  /// kicks in (patient side, first open) — 3s after the permission flow
+  /// resolves, so the welcome always starts after ALL permissions are
+  /// granted.
+  static const Duration _welcomeStartDelay = Duration(milliseconds: 3000);
 
   /// Tracks the messages subscription so it can be cancelled on dispose.
   StreamSubscription? _messagesSub;
@@ -727,9 +729,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               scale: _welcomeActive ? 1.05 : 1.0,
               child: HealthAssistantVideo(
                 // The avatar video stays paused until the welcome flow
-                // actually starts (1.5s after the screen opens) — then it
-                // autoplays, with the greeting voice following after the
-                // patient's chosen stagger (Profile → Auto-Play Welcome).
+                // actually starts (3s after the screen opens) — then it
+                // autoplays, with the greeting voice starting together
+                // with it ("With the video" — Profile → Auto-Play
+                // Welcome).
                 // If the patient paused it last session (localStorage), it
                 // stays paused and only starts after they tap to play.
                 autoPlay: _welcomeActive && !_avatarVideoPaused,

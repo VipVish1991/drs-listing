@@ -455,12 +455,12 @@ class SupabaseService {
     );
   }
 
-  /// Save (or clear, when [link] is null/empty) the Google Meet URL for a
-  /// video consultation. Runs with the `x-user-id` header — both the
-  /// booking patient and the owning clinic pass their own user id, which
-  /// the owner-scoped appointments UPDATE policy accepts (it is
-  /// column-agnostic). Returns `true` only when the row actually came
-  /// back, so the UI never claims the link was saved that wasn't.
+  /// Save (or clear, when [link] is null/empty) the shared Google Meet URL
+  /// for a video/tele consultation. Runs with the `x-user-id` header — the
+  /// appointments UPDATE policy lets both the owning patient and the
+  /// clinic write it. Returns `true` only when the row actually came back
+  /// (a silent RLS denial is reported as `false`, same contract as
+  /// [updateUserName]).
   Future<bool> updateAppointmentMeetLink(
     String appointmentId,
     String? link, {
@@ -479,7 +479,7 @@ class SupabaseService {
       return rows.isNotEmpty;
     } catch (e) {
       // The meet_link column may not exist yet if the migration hasn't
-      // been applied — never crash the video-call sheet over it.
+      // been applied — never crash the video-call flow over it.
       debugPrint('⚠️ [updateAppointmentMeetLink] failed: $e');
       return false;
     }

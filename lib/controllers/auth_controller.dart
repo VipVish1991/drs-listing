@@ -123,9 +123,9 @@ class AuthController extends GetxController {
           );
           if (fullDetails != null) {
             // Merge the Places-enriched model with the doctor-set fields
-            // from the DB row (upiId, unavailableRanges, experienceYears)
-            // that Google Places never returns — otherwise a re-login
-            // silently drops the saved UPI ID and the profile shows
+            // from the DB row (unavailableRanges, experienceYears) that
+            // Google Places never returns — otherwise a re-login silently
+            // drops the saved doctor-set state and the profile shows
             // "Not set" even though the DB value is intact. Shares the
             // merge with DoctorController.loadDoctorFromDb so the two can
             // never drift apart.
@@ -180,8 +180,7 @@ class AuthController extends GetxController {
               );
               if (fullDetails != null) {
                 // Same doctor-set field merge as the primary path — the
-                // fallback must not drop the saved UPI ID / availability
-                // either.
+                // fallback must not drop the saved availability either.
                 enrichedDoctor = DoctorController.mergeDoctorSetFields(
                   fullDetails,
                   dbDoctor,

@@ -4,6 +4,7 @@ import '../config/theme.dart';
 import '../models/appointment_model.dart';
 import '../models/payment_model.dart';
 import '../services/launch_service.dart';
+import '../services/meet_consult_service.dart';
 import 'appointment_info_card.dart';
 import 'prescription_gallery.dart';
 
@@ -36,6 +37,11 @@ class AppointmentDetailsSheet {
   /// one exists) — rendered as a fee card right beside the footer actions
   /// (e.g. Reschedule): amount + status chip + method, plus the paid date
   /// and UPI transaction id when known. Null → no payment card.
+  ///
+  /// [onSaveMeetLink] persists a newly created Meet link back to the
+  /// appointment (each screen wires it to its controller's saveMeetLink),
+  /// so BOTH sides join the same room. When the appointment already
+  /// carries a stored link, the button joins that room directly instead.
   static void show({
     required AppointmentModel appointment,
     required String displayStatus,
@@ -45,6 +51,7 @@ class AppointmentDetailsSheet {
     List<Widget>? footerActions,
     String? phoneNumber,
     PaymentModel? payment,
+    Future<bool> Function(String link)? onSaveMeetLink,
   }) {
     final statusColor = AppointmentDetailsSheet.statusColor(displayStatus);
     final phone = phoneNumber ?? appointment.callNumber;
@@ -380,6 +387,91 @@ class AppointmentDetailsSheet {
                     ),
                   ),
                 ),
+              ],
+              // ── Join Video Call (Google Meet SDK) ──
+              // Remote (video + tele/audio) consultations start the
+              // Meet-backed consultation: Google Sign-In → calendar event
+              // → the meeting link opens externally (browser / Meet app).
+              // When a link is already stored on the appointment, the
+              // button JOINS that same room instead of creating a new one
+              // — so the patient and the clinic always end up together.
+              if (appointment.isRemoteConsultation) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('join_video_call'),
+                    onPressed: () async {
+                      final ctx = Get.context;
+                      if (ctx == null) return;
+                      final result = await MeetConsultService.joinConsultation(
+                        ctx,
+                        appointment,
+                      );
+                      // Persist a newly created link so the OTHER side
+                      // joins the same room on their next open. Safe to
+                      // call for a stored link too — it re-saves the same
+                      // value (non-destructive). Non-fatal on failure.
+                      if (result.success && result.meetingLink != null) {
+                        await onSaveMeetLink?.call(result.meetingLink!);
+                      }
+                    },
+                    icon: const Icon(Icons.videocam_rounded, size: 18),
+                    label: const Text(
+                      'Join Video Call',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      side: BorderSide(color: AppColors.primary.withAlpha(70)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                ),
+                // The shared room, surfaced so both sides see they're
+                // joining the same meeting.
+                if ((appointment.meetLink ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withAlpha(10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.link_rounded,
+                          size: 14,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            appointment.meetLink!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
               // ── Fee / payment — rendered right beside the footer
               //    actions (e.g. Reschedule) so the patient and doctor see
