@@ -52,8 +52,8 @@ void main() {
   });
 
   group('MeetConsultService (web fallback)', () {
-    testWidgets('no stored link → friendly error, no URL launched',
-        (tester) async {
+    testWidgets('no stored link → the static room opens (web falls back '
+        'to the shared link)', (tester) async {
       BuildContext? captured;
       await tester.pumpWidget(
         Builder(builder: (context) {
@@ -65,9 +65,9 @@ void main() {
       final result =
           await joinConsultation(captured!, _remoteAppointment());
 
-      expect(fake.launchCalls, isEmpty);
-      expect(result.success, isFalse);
-      expect(result.meetingLink, isNull);
+      expect(fake.launchCalls, [kStaticMeetLink]);
+      expect(result.success, isTrue);
+      expect(result.meetingLink, kStaticMeetLink);
     });
 
     testWidgets('stored link opens that exact room externally',
@@ -91,8 +91,8 @@ void main() {
       expect(result.meetingLink, stored);
     });
 
-    testWidgets('startConsultation (profile entry) reports mobile-only '
-        'with no URL launched', (tester) async {
+    testWidgets('startConsultation (profile entry) opens the static room',
+        (tester) async {
       BuildContext? captured;
       await tester.pumpWidget(
         Builder(builder: (context) {
@@ -106,8 +106,9 @@ void main() {
         title: 'Video Consultation — Dr. Meet',
       );
 
-      expect(fake.launchCalls, isEmpty);
-      expect(result.success, isFalse);
+      expect(fake.launchCalls, [kStaticMeetLink]);
+      expect(result.success, isTrue);
+      expect(result.meetingLink, kStaticMeetLink);
     });
 
     test('exposes the shared MeetJoinResult shape', () async {

@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
 
 import 'package:DrsListing/config/theme.dart';
-import 'package:DrsListing/screens/doctor/doctor_appointments_screen.dart';
+import 'package:DrsListing/utils/doctor_appointment_actions.dart';
 
 /// Opens [PrescriptionUploadDialog] inside a [GetMaterialApp] (so its
 /// `Get.back(result:)` calls resolve against a real navigator) and returns

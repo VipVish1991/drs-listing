@@ -9,6 +9,7 @@ import '../../models/appointment_model.dart';
 import '../../routes/app_routes.dart';
 import '../../services/launch_service.dart';
 import '../../services/share_service.dart';
+import '../../utils/doctor_appointment_actions.dart';
 import '../../utils/patient_history_csv.dart';
 import '../../widgets/appointment_details_sheet.dart';
 import '../../widgets/appointment_info_card.dart';
@@ -528,6 +529,13 @@ class PatientHistoryScreen extends StatelessWidget {
     final canReschedule = _canReschedule(
       Get.find<AppointmentController>().effectiveStatus(a),
     );
+    final controller = Get.find<DoctorController>();
+    final payment = controller.paymentsByAppointment[a.appointmentId];
+    // "Mark Completed" is gated on the consultation fee being settled —
+    // while the payment is still Pending (unpaid), the action renders
+    // disabled, exactly like the Appointments-tab cards and sheet.
+    final paymentPending =
+        payment != null && payment.paymentStatus == 'Pending';
     AppointmentDetailsSheet.show(
       appointment: a,
       // Same empty→'Upcoming' fallback as the doctor's Appointments tab.
@@ -538,8 +546,14 @@ class PatientHistoryScreen extends StatelessWidget {
       // Fee/payment recorded for this visit (the same map the Appointments
       // tab cards use) — the clinic sees what the patient owes and how it
       // stands right inside the sheet.
-      payment:
-          Get.find<DoctorController>().paymentsByAppointment[a.appointmentId],
+      payment: payment,
+      // Doctor actions right inside the sheet (same compact pills as the
+      // Appointments tab): mark the consultation complete or cancel it.
+      showDoctorActions: true,
+      onCancel: () => showCancelAppointmentDialog(controller, a),
+      onComplete: paymentPending
+          ? null
+          : () => showCompleteAppointmentDialog(controller, a),
       footerActions: [
         if (canReschedule)
           SizedBox(

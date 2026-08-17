@@ -42,6 +42,17 @@ class AppointmentDetailsSheet {
   /// appointment (each screen wires it to its controller's saveMeetLink),
   /// so BOTH sides join the same room. When the appointment already
   /// carries a stored link, the button joins that room directly instead.
+  ///
+  /// [showDoctorActions] renders the doctor-side **Cancel** / **Mark
+  /// Completed** compact pills (the same design as the appointment cards)
+  /// at the bottom of the sheet — handy right after a video meeting
+  /// closes. [onCancel] runs the cancel flow; [onComplete] runs the
+  /// complete flow and, when null, renders "Mark Completed" DISABLED
+  /// (the consultation fee is still Pending — same gating as the card
+  /// button). Both return `true` once the doctor CONFIRMED the action
+  /// (the confirmation dialog popped with its result) — the sheet then
+  /// closes itself so the refreshed appointments list is visible. The
+  /// patient side never passes these.
   static void show({
     required AppointmentModel appointment,
     required String displayStatus,
@@ -52,6 +63,9 @@ class AppointmentDetailsSheet {
     String? phoneNumber,
     PaymentModel? payment,
     Future<bool> Function(String link)? onSaveMeetLink,
+    bool showDoctorActions = false,
+    Future<bool?> Function()? onCancel,
+    Future<bool?> Function()? onComplete,
   }) {
     final statusColor = AppointmentDetailsSheet.statusColor(displayStatus);
     final phone = phoneNumber ?? appointment.callNumber;
@@ -136,12 +150,20 @@ class AppointmentDetailsSheet {
                               color: statusColor,
                             ),
                             const SizedBox(width: 5),
-                            Text(
-                              displayStatus,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: statusColor,
+                            // Flexible + ellipsis: at large text scales a
+                            // long status label ('Completed' / 'Cancelled')
+                            // must shrink instead of overflowing the
+                            // header row by a pixel.
+                            Flexible(
+                              child: Text(
+                                displayStatus,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: statusColor,
+                                ),
                               ),
                             ),
                           ],
@@ -395,7 +417,11 @@ class AppointmentDetailsSheet {
               // When a link is already stored on the appointment, the
               // button JOINS that same room instead of creating a new one
               // — so the patient and the clinic always end up together.
-              if (appointment.isRemoteConsultation) ...[
+              // Hidden once the consultation is finished (Completed) or
+              // dropped (Cancelled) — no joining a meeting that's over.
+              if (appointment.isRemoteConsultation &&
+                  displayStatus != 'Cancelled' &&
+                  displayStatus != 'Completed') ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -479,6 +505,50 @@ class AppointmentDetailsSheet {
               if (payment != null) ...[
                 const SizedBox(height: 16),
                 AppointmentPaymentCard(payment: payment),
+              ],
+              // ── Doctor actions — the same compact Cancel / Mark
+              //    Completed pills as the appointment cards, so the clinic
+              //    can finish (or drop) a consultation right from the
+              //    sheet, e.g. right after the video meeting closes. Only
+              //    rendered on the doctor side and only while the
+              //    appointment isn't finalised; "Mark Completed" is
+              //    disabled while the consultation fee is still Pending
+              //    (unpaid) — same gating as the card button. ──
+              if (showDoctorActions &&
+                  displayStatus != 'Cancelled' &&
+                  displayStatus != 'Completed') ...[
+                const SizedBox(height: 16),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 10,
+                  runSpacing: 8,
+                  children: [
+                    _CompactActionBtn(
+                      label: 'Cancel',
+                      icon: Icons.close_rounded,
+                      color: AppColors.error,
+                      onTap: onCancel == null
+                          ? null
+                          : () async {
+                              final acted = await onCancel();
+                              _closeSheetAfterAction(acted);
+                            },
+                    ),
+                    _CompactActionBtn(
+                      label: 'Mark Completed',
+                      icon: Icons.check_circle_rounded,
+                      color: AppColors.success,
+                      isPrimary: true,
+                      enabled: onComplete != null,
+                      onTap: onComplete == null
+                          ? null
+                          : () async {
+                              final acted = await onComplete();
+                              _closeSheetAfterAction(acted);
+                            },
+                    ),
+                  ],
+                ),
               ],
               // Screen-specific actions (e.g. View Doctor Profile).
               if (footerActions != null && footerActions.isNotEmpty) ...[
@@ -689,7 +759,108 @@ class AppointmentPaymentCard extends StatelessWidget {
               label: 'Transaction',
               value: payment.transactionId!,
             ),
+          // ── Refund details (when the clinic refunded this fee) — how
+          //    the money went back (Online UPI / Cash) and, for online
+          //    refunds, the refund's own UPI transaction id. ──
+          if (payment.refundMethod != null)
+            _PaymentInfoRow(
+              icon: Icons.currency_exchange_rounded,
+              color: AppColors.info,
+              label: 'Refunded via',
+              value: payment.refundMethodLabel ?? '—',
+            ),
+          if (payment.refundTransactionId != null)
+            _PaymentInfoRow(
+              icon: Icons.receipt_long_rounded,
+              color: AppColors.info,
+              label: 'Refund txn',
+              value: payment.refundTransactionId!,
+            ),
         ],
+      ),
+    );
+  }
+}
+
+/// After a doctor action was CONFIRMED (cancel / complete — the
+/// confirmation dialog on top already popped with `true`), close the
+/// details bottom sheet so the refreshed appointments list is visible.
+/// Nothing happens when the action was dismissed (Keep / barrier tap /
+/// null), or when the sheet is already gone.
+void _closeSheetAfterAction(bool? acted) {
+  if (acted == true &&
+      (Get.isBottomSheetOpen ?? false) &&
+      !(Get.isDialogOpen ?? false)) {
+    Get.back();
+  }
+}
+
+/// Compact pill action used inside the details sheet — the same design as
+/// the appointment cards' `_ModernActionBtn`: filled when primary, tinted
+/// otherwise, greyed-out + inert when disabled.
+class _CompactActionBtn extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback? onTap;
+  final bool isPrimary;
+
+  /// When false the pill renders greyed-out and inert — used for the
+  /// "Mark Completed" action while a fee payment is still Pending.
+  final bool enabled;
+
+  const _CompactActionBtn({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+    this.isPrimary = false,
+    this.enabled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Disabled: flat grey pill, muted text, no tap handler.
+    final Color bg = enabled
+        ? (isPrimary ? color : color.withAlpha(15))
+        : AppColors.textCaption.withAlpha(14);
+    final Color fg = enabled
+        ? (isPrimary ? Colors.white : color)
+        : AppColors.textCaption.withAlpha(140);
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        // A no-op handler while disabled: with a null onTap the InkWell
+        // adds no gesture recognizer, so the tap falls through to the
+        // sheet's scroll surface beneath. This recognizer swallows it.
+        onTap: enabled ? onTap : () {},
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 6),
+              // Flexible + ellipsis: same sub-pixel guard as the screen's
+              // _ModernActionBtn — a Wrap can constrain this row tighter
+              // than the label's intrinsic width at large text scales.
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: fg,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

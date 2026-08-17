@@ -182,5 +182,48 @@ void main() {
       // change, never a time shift).
       expect(parsed.paidAt!.toUtc(), DateTime.utc(2026, 8, 6, 5, 0));
     });
+
+    test('refund fields round-trip and label the refund method', () {
+      final payment = PaymentModel(
+        id: 'pay_refund',
+        appointmentId: 'APT_REFUND',
+        patientId: 'user_1',
+        paymentStatus: 'Refunded',
+        paymentMethod: 'online',
+        amount: 500,
+        refundMethod: 'online',
+        refundedAt: DateTime.utc(2026, 8, 16, 9, 0),
+        refundUpiId: 'patient@okhdfcbank',
+        refundTransactionId: 'RFD987',
+        refundRawResponse: 'upi://pay?txnId=RFD987&Status=SUCCESS',
+      );
+
+      final json = payment.toJson();
+      expect(json['refund_method'], 'online');
+      expect(json['refund_upi_id'], 'patient@okhdfcbank');
+      expect(json['refund_transaction_id'], 'RFD987');
+      expect(json['refund_raw_response'], 'upi://pay?txnId=RFD987&Status=SUCCESS');
+      expect(json['refunded_at'], isNotNull);
+
+      final restored = PaymentModel.fromJson(json);
+      expect(restored.refundMethod, 'online');
+      expect(restored.refundUpiId, 'patient@okhdfcbank');
+      expect(restored.refundTransactionId, 'RFD987');
+      expect(restored.refundRawResponse, 'upi://pay?txnId=RFD987&Status=SUCCESS');
+      expect(restored.refundedAt, isNotNull);
+      expect(restored.refundedAt!.isUtc, isFalse);
+      expect(restored.refundMethodLabel, 'Online (UPI)');
+
+      // A never-refunded payment has no refund data / label.
+      const unrefunded = PaymentModel(
+        patientId: 'user_1',
+        paymentStatus: 'Paid',
+        paymentMethod: 'offline',
+        amount: 500,
+      );
+      expect(unrefunded.refundMethodLabel, isNull);
+      expect(const PaymentModel(patientId: 'u', refundMethod: 'cash')
+          .refundMethodLabel, 'Cash');
+    });
   });
 }

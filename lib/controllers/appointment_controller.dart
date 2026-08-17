@@ -5,6 +5,7 @@ import '../models/appointment_model.dart';
 import '../models/doctor_model.dart';
 import '../models/doctor_slot_model.dart';
 import '../models/payment_model.dart';
+import '../services/meet_consult_service.dart';
 import '../services/supabase_service.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/doctor_controller.dart';
@@ -362,6 +363,10 @@ class AppointmentController extends GetxController {
         // used by the doctor side to offer the prescription upload only
         // for Tele/Video consultations.
         'consultation_type': getSlotTypeLabel(appointmentTime.value),
+        // Every new appointment carries the SAME static Google Meet room
+        // so the patient and clinic always join one fixed meeting — never
+        // a fresh per-appointment event.
+        'meet_link': kStaticMeetLink,
       };
       // Never persist an unknown/empty type (would read as legacy row).
       if ((data['consultation_type'] ?? '').isEmpty) {

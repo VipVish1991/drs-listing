@@ -7,7 +7,7 @@ import 'package:url_launcher_platform_interface/url_launcher_platform_interface.
 import 'package:DrsListing/config/theme.dart';
 import 'package:DrsListing/models/appointment_model.dart';
 import 'package:DrsListing/models/payment_model.dart';
-import 'package:DrsListing/services/meet_consult_service_io.dart';
+import 'package:DrsListing/services/meet_consult_service.dart';
 import 'package:DrsListing/widgets/appointment_details_sheet.dart';
 
 /// Records url_launcher calls so the Join button's external open can be
@@ -37,28 +37,6 @@ class _SheetFakeUrlLauncher extends UrlLauncherPlatform {
   }
 }
 
-/// Fake of the Google API surface so the Join button can run the full
-/// sign-in → event → link flow without platform channels.
-class _SheetFakeMeetGateway implements MeetFlowGateway {
-  Map<String, String>? createEventResult = const {
-    'id': 'evt_1',
-    'link': 'https://meet.google.com/created-room-1',
-  };
-
-  @override
-  Future<bool> signIn(BuildContext context) async => true;
-
-  @override
-  Future<Map<String, String>?> createEvent({
-    required String title,
-    required String description,
-    required DateTime startTime,
-    required DateTime endTime,
-  }) async {
-    return createEventResult;
-  }
-}
-
 /// Pumps a host screen with a button that opens the details sheet for
 /// [appointment], passing [phoneNumber] and [payment] through (as the
 /// doctor's screen does with the patient's number + payment row).
@@ -68,6 +46,10 @@ Future<void> _openSheet(
   String? phoneNumber,
   PaymentModel? payment,
   Future<bool> Function(String link)? onSaveMeetLink,
+  bool showDoctorActions = false,
+  Future<bool?> Function()? onCancel,
+  Future<bool?> Function()? onComplete,
+  String displayStatus = 'Upcoming',
 }) async {
   await tester.pumpWidget(
     GetMaterialApp(
@@ -78,11 +60,14 @@ Future<void> _openSheet(
             child: ElevatedButton(
               onPressed: () => AppointmentDetailsSheet.show(
                 appointment: appointment,
-                displayStatus: 'Upcoming',
+                displayStatus: displayStatus,
                 headerName: appointment.patientName ?? 'Patient',
                 phoneNumber: phoneNumber,
                 payment: payment,
                 onSaveMeetLink: onSaveMeetLink,
+                showDoctorActions: showDoctorActions,
+                onCancel: onCancel,
+                onComplete: onComplete,
               ),
               child: const Text('open sheet'),
             ),
@@ -337,6 +322,57 @@ void main() {
       expect(find.text('https://meet.google.com/abc-def-ghi'), findsOneWidget);
     });
 
+    testWidgets('completed video consultations hide the Join Video Call '
+        'button and the Meet link', (tester) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_DONE_1',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'video',
+        meetLink: 'https://meet.google.com/abc-def-ghi',
+      );
+
+      await _openSheet(
+        tester,
+        appointment,
+        displayStatus: 'Completed',
+      );
+
+      // The consultation is over — no point joining a finished meeting.
+      expect(
+        find.byKey(const ValueKey('join_video_call')),
+        findsNothing,
+      );
+      expect(find.text('Join Video Call'), findsNothing);
+      expect(find.text('https://meet.google.com/abc-def-ghi'), findsNothing);
+    });
+
+    testWidgets('cancelled video consultations hide the Join Video Call '
+        'button and the Meet link', (tester) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_VC_CANCEL_1',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'tele',
+        meetLink: 'https://meet.google.com/abc-def-ghi',
+      );
+
+      await _openSheet(
+        tester,
+        appointment,
+        displayStatus: 'Cancelled',
+      );
+
+      expect(
+        find.byKey(const ValueKey('join_video_call')),
+        findsNothing,
+      );
+      expect(find.text('Join Video Call'), findsNothing);
+      expect(find.text('https://meet.google.com/abc-def-ghi'), findsNothing);
+    });
+
     testWidgets('no stored link means no shared-room row', (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_LINK_2',
@@ -355,16 +391,14 @@ void main() {
       expect(find.byIcon(Icons.link_rounded), findsNothing);
     });
 
-    testWidgets('tapping Join on a fresh appointment creates the meeting, '
-        'opens the link and saves it (both sides join the same room)',
-        (tester) async {
-      // Fake the Google APIs (the VM test resolves the io implementation)
-      // and the url launcher so the whole button flow runs end-to-end.
+    testWidgets('tapping Join on a fresh appointment opens the STATIC room '
+        'and saves it (both sides join the same meeting)', (tester) async {
+      // Fake the url launcher so the whole button flow runs end-to-end
+      // (the VM test resolves the io implementation, which opens the
+      // shared static room externally — no Google APIs involved).
       final savedLinks = <String>[];
       final urlLauncher = _SheetFakeUrlLauncher();
       UrlLauncherPlatform.instance = urlLauncher;
-      meetFlowGateway = _SheetFakeMeetGateway();
-      addTearDown(() => meetFlowGateway = SdkMeetFlowGateway());
 
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_CREATE_1',
@@ -386,12 +420,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('join_video_call')));
       await tester.pumpAndSettle();
 
-      // The flow ran: the newly created room opened externally AND was
-      // persisted via the onSaveMeetLink callback (wired to the
-      // controller's saveMeetLink on both screens), so the other side
-      // joins the same room.
-      expect(urlLauncher.launchCalls, ['https://meet.google.com/created-room-1']);
-      expect(savedLinks, ['https://meet.google.com/created-room-1']);
+      // The static room opened externally AND was persisted via the
+      // onSaveMeetLink callback (wired to the controller's saveMeetLink on
+      // both screens), so the other side joins the same meeting.
+      expect(urlLauncher.launchCalls, [kStaticMeetLink]);
+      expect(savedLinks, [kStaticMeetLink]);
     });
 
     testWidgets('tapping Join when a link is already stored reuses the '
@@ -399,8 +432,6 @@ void main() {
       final savedLinks = <String>[];
       final urlLauncher = _SheetFakeUrlLauncher();
       UrlLauncherPlatform.instance = urlLauncher;
-      meetFlowGateway = _SheetFakeMeetGateway();
-      addTearDown(() => meetFlowGateway = SdkMeetFlowGateway());
 
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_REUSE_1',
@@ -427,6 +458,115 @@ void main() {
       // gateway's createEvent would return a different link otherwise).
       expect(urlLauncher.launchCalls, ['https://meet.google.com/abc-def-ghi']);
       expect(savedLinks, ['https://meet.google.com/abc-def-ghi']);
+    });
+
+    testWidgets('doctor actions render Cancel + Mark Completed compact pills, '
+        'fire their callbacks and auto-close the sheet on confirmation',
+        (tester) async {
+      var cancelled = 0;
+      var completed = 0;
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_DOC_ACT_1',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'video',
+      );
+
+      await _openSheet(
+        tester,
+        appointment,
+        showDoctorActions: true,
+        onCancel: () async {
+          cancelled++;
+          return true;
+        },
+        onComplete: () async {
+          completed++;
+          return true;
+        },
+      );
+
+      expect(find.text('Cancel'), findsOneWidget);
+      expect(find.text('Mark Completed'), findsOneWidget);
+
+      await tester.tap(find.text('Mark Completed'));
+      await tester.pumpAndSettle();
+      expect(completed, 1);
+      // A confirmed action closes the sheet automatically.
+      expect(find.text('Appointment ID'), findsNothing);
+
+      // Reopen for the Cancel action.
+      await _openSheet(
+        tester,
+        appointment,
+        showDoctorActions: true,
+        onCancel: () async {
+          cancelled++;
+          return true;
+        },
+        onComplete: () async {
+          completed++;
+          return true;
+        },
+      );
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(cancelled, 1);
+      expect(find.text('Appointment ID'), findsNothing);
+    });
+
+    testWidgets('Mark Completed renders disabled when the fee is still '
+        'Pending (null onComplete) — no callback fires', (tester) async {
+      var completed = 0;
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_DOC_ACT_2',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'tele',
+      );
+
+      await _openSheet(
+        tester,
+        appointment,
+        showDoctorActions: true,
+        onCancel: () async => true,
+        onComplete: null,
+      );
+
+      expect(find.text('Mark Completed'), findsOneWidget);
+      await tester.tap(find.text('Mark Completed'));
+      await tester.pump();
+      expect(completed, 0);
+    });
+
+    testWidgets('doctor actions are hidden for finalised appointments and '
+        'when the patient side opens the sheet', (tester) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_DOC_ACT_3',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+        consultationType: 'video',
+      );
+
+      // Patient side: no doctor actions.
+      await _openSheet(tester, appointment);
+      expect(find.text('Mark Completed'), findsNothing);
+      expect(find.text('Cancel'), findsNothing);
+
+      // Finalised (Completed) doctor appointment: actions hidden.
+      await _openSheet(
+        tester,
+        appointment,
+        showDoctorActions: true,
+        onCancel: () async => true,
+        onComplete: () async => true,
+        displayStatus: 'Completed',
+      );
+      expect(find.text('Mark Completed'), findsNothing);
+      expect(find.text('Cancel'), findsNothing);
     });
 
     testWidgets('in-clinic type chip uses the storefront icon', (tester) async {
@@ -655,6 +795,39 @@ void main() {
       expect(find.text('₹500'), findsOneWidget);
       expect(find.text('Refunded'), findsOneWidget);
       expect(find.text('Offline (Clinic)'), findsOneWidget);
+    });
+
+    testWidgets('refunded payment shows how it was refunded (via + txn)',
+        (tester) async {
+      final appointment = AppointmentModel(
+        appointmentId: 'APT_PAY_4',
+        patientName: 'Rahul Sharma',
+        appointmentDate: '2026-08-03',
+        appointmentTime: '10:00 AM',
+      );
+
+      await _openSheet(
+        tester,
+        appointment,
+        payment: PaymentModel(
+          appointmentId: 'APT_PAY_4',
+          patientId: 'user_1',
+          amount: 800,
+          paymentStatus: 'Refunded',
+          paymentMethod: 'online',
+          refundMethod: 'online',
+          refundUpiId: 'patient@okhdfcbank',
+          refundTransactionId: 'RFD987',
+        ),
+      );
+
+      expect(find.text('Refunded'), findsOneWidget);
+      expect(find.text('Refunded via'), findsOneWidget);
+      // 'Online (UPI)' appears twice: the payment Method row AND the new
+      // 'Refunded via' row (both are online here).
+      expect(find.text('Online (UPI)'), findsNWidgets(2));
+      expect(find.text('Refund txn'), findsOneWidget);
+      expect(find.text('RFD987'), findsOneWidget);
     });
 
     testWidgets('no payment card when no payment row exists', (tester) async {

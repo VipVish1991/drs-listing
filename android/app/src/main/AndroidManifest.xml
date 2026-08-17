@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Camera for scanning the patient's UPI QR code (refund flow) -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <!-- FCM push notifications (Android 13+ runtime permission; the app
          requests it via FirebaseMessaging.requestPermission). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -33,7 +35,6 @@
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-            android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
             android:enableOnBackInvokedCallback="true">
             <!-- Specifies an Android theme to apply to this Activity as soon as
@@ -151,15 +152,36 @@
             <data android:scheme="smsto" />
         </intent>
     </queries>
-    <!-- UPI payment apps (upi_india): Android 11+ package visibility
-         requires an explicit <queries> entry for the upi:// intent scheme,
-         otherwise getAllUpiApps() can't see GPay/PhonePe/Paytm and the
-         online-pay option shows no apps. The upi_india plugin also ships
-         its own <queries> declarations, merged in automatically. -->
+    <!-- UPI payment apps: Android 11+ package visibility requires an
+         explicit <queries> declaration, otherwise the app's own resolver
+         query (QuantupiPlugin) can only see apps the user has already
+         used — the payment chooser would show just a few providers
+         instead of every installed UPI app. The <intent> signature
+         mirrors the REAL `upi://pay` deep link (scheme + host): a
+         scheme-only signature does not match the UPI apps' host-bearing
+         intent-filters, so the host is declared here too. The <package>
+         entries make the major Indian UPI apps (GPay / PhonePe / Paytm /
+         Cred / Amazon Pay / BHIM + common bank apps) visible regardless
+         of any future intent-filter changes. -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="upi" android:host="*" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="upi" />
         </intent>
+        <package android:name="com.google.android.apps.nbu.paisa.user" />
+        <package android:name="com.phonepe.app" />
+        <package android:name="net.one97.paytm" />
+        <package android:name="com.dreamplug.androidapp" />
+        <package android:name="in.amazon.mShop.android.shopping" />
+        <package android:name="org.npci.upiapp" />
+        <package android:name="com.axis.mobile" />
+        <package android:name="com.sbi.lotusintouch" />
+        <package android:name="com.hdfcbank.android.now" />
+        <package android:name="com.snapwork.hdfc" />
+        <package android:name="com.jio.myjio" />
     </queries>
 </manifest>

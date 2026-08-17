@@ -10,7 +10,6 @@ import '../../controllers/doctor_controller.dart';
 import '../../models/doctor_model.dart';
 import '../../models/unavailable_range.dart';
 import '../../services/launch_service.dart';
-import '../../services/meet_consult_service.dart';
 import '../../services/share_service.dart';
 import '../../services/supabase_service.dart';
 import '../../utils/snackbar_helpers.dart';
@@ -46,8 +45,6 @@ class DoctorProfileScreen extends StatelessWidget {
                 _buildUpiCard(controller),
                 const SizedBox(height: 24),
                 _buildAvailabilityCard(controller),
-                const SizedBox(height: 24),
-                _buildVideoConsultCard(controller),
                 const SizedBox(height: 24),
                 _buildBottomActions(controller),
                 const SizedBox(height: 24),
@@ -517,103 +514,6 @@ class DoctorProfileScreen extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: _AvailabilityCard(controller: controller),
     ).animate().fadeIn(duration: 400.ms, delay: 220.ms);
-  }
-
-  /// Video Consultation card — lets the doctor start a Meet consultation
-  /// straight from their own profile (no appointment needed). Same flow as
-  /// the appointment details sheet: Google Sign-In → calendar event → the
-  /// meeting link opens externally.
-  Widget _buildVideoConsultCard(DoctorController controller) {
-    return Obx(() {
-      final doctor = controller.currentDoctor.value;
-      if (doctor == null) return const SizedBox();
-
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.bgCard,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(6),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 4,
-                    height: 18,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  const Icon(
-                    Icons.videocam_rounded,
-                    size: 18,
-                    color: AppColors.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'Video Consultation',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textHeading,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              // Start a fresh Meet consultation (Google Sign-In → calendar
-              // event → the meeting link opens in the browser/Meet app).
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: OutlinedButton.icon(
-                  key: const ValueKey('start_video_consultation'),
-                  onPressed: () => _startVideoConsultation(doctor),
-                  icon: const Icon(Icons.videocam_rounded, size: 18),
-                  label: const Text(
-                    'Start Consultation',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primary,
-                    side: BorderSide(color: AppColors.primary.withAlpha(70)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ).animate().fadeIn(duration: 400.ms, delay: 225.ms);
-    });
-  }
-
-  Future<void> _startVideoConsultation(DoctorModel doctor) async {
-    final ctx = Get.context;
-    if (ctx == null) return;
-    await MeetConsultService.startConsultation(
-      ctx,
-      title: 'Video Consultation — ${doctor.name}',
-    );
   }
 
   /// Bottom action row with three buttons: Directions, Share, Book Appointment.

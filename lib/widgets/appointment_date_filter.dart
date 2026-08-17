@@ -220,28 +220,34 @@ class _AppointmentDateFilterState extends State<AppointmentDateFilter> {
                 ),
               ],
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  '${selectedDate.day}',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    height: 1.1,
+            // FittedBox scales the day + month down as a unit when the
+            // system text scale grows — otherwise the fixed 52×52 box
+            // overflows at large accessibility text sizes.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '${selectedDate.day}',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      height: 1.1,
+                    ),
                   ),
-                ),
-                Text(
-                  monthName.substring(0, 3),
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white.withAlpha(200),
-                    height: 1.1,
+                  Text(
+                    monthName.substring(0, 3),
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withAlpha(200),
+                      height: 1.1,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 14),
@@ -299,18 +305,25 @@ class _AppointmentDateFilterState extends State<AppointmentDateFilter> {
                       color: AppColors.textCaption,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      apptCount > 0
-                          ? '$apptCount appointment${apptCount == 1 ? '' : 's'}'
-                          : 'No appointments',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: apptCount > 0
-                            ? AppColors.primary
-                            : AppColors.textCaption,
-                        fontWeight: apptCount > 0
-                            ? FontWeight.w600
-                            : FontWeight.normal,
+                    // Flexible + ellipsis: the AnimatedSize collapse
+                    // animation lays the header out at shrinking widths —
+                    // without this the count text overflows horizontally.
+                    Flexible(
+                      child: Text(
+                        apptCount > 0
+                            ? '$apptCount appointment${apptCount == 1 ? '' : 's'}'
+                            : 'No appointments',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: apptCount > 0
+                              ? AppColors.primary
+                              : AppColors.textCaption,
+                          fontWeight: apptCount > 0
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                        ),
                       ),
                     ),
                   ],

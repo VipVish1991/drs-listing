@@ -416,6 +416,35 @@ void main() {
     },
   );
 
+  testWidgets('details sheet shows the doctor Cancel / Mark Completed '
+      'actions for an Upcoming visit', (tester) async {
+    await pumpHistory(
+      tester,
+      appointments: [
+        appointmentBasic(
+          appointmentId: 'APT_ACT_1',
+          patientName: 'Reena',
+          patientPhone: '9898989898',
+          appointmentDate: '2026-07-01',
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+        ),
+      ],
+    );
+
+    await tester.tap(find.text('Visit 1'));
+    await tester.pumpAndSettle();
+
+    // The same compact doctor actions as the Appointments-tab sheet: mark
+    // the consultation complete or cancel it right from the history sheet.
+    expect(find.text('Mark Completed'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('history_details_close')));
+    await tester.pumpAndSettle();
+    await _settleAnimations(tester);
+  });
+
   testWidgets(
     'All Prescriptions button sits on the page bottom and opens the swipeable gallery newest-first',
     (tester) async {

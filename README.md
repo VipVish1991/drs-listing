@@ -255,10 +255,21 @@ on the Appointments screen each card shows the payment for that booking
 (amount + status chip). An **offline Pending** payment — "pay at clinic" —
 gets **Mark Paid** / **Refund** actions right on the card, so the clinic
 settles it as soon as the cash is received; the flip writes
-`payment_status` + `paid_at` and the card updates in place. Only clinics
-that own the appointment (their `doctors` row's `user_id` matches the
-caller) can do this, and the UPDATE column grant limits them to the status
-fields — never the amount, patient or method.
+`payment_status` + `paid_at` and the card updates in place. **Refund** is
+also offered on **Paid** payments (online or offline) — money the clinic
+collected and is now giving back. Tapping **Refund** opens a picker:
+**Online (UPI)** asks for the patient's UPI ID (the VPA their UPI QR code
+encodes), fires a `upi://pay` intent from the clinic's own UPI app to that
+VPA, and marks the payment `Refunded` ONLY when the UPI app confirms the
+refund — an unconfirmed payment is never recorded as refunded; **Cash**
+records the refund directly. Refund details (`refund_method`,
+`refunded_at`, `refund_upi_id`, `refund_transaction_id`,
+`refund_raw_response`) are stored on the `payments` row
+(`supabase/migrations/20260816000003_add_refund_details.sql`) and shown in
+the details sheet, so every refund is traceable to its UPI transaction.
+Only clinics that own the appointment (their `doctors` row's `user_id`
+matches the caller) can do this, and the UPDATE column grant limits them to
+the status + refund fields — never the amount, patient or method.
 
 **Web / QR bookings** (the `booking-page` Edge Function) record the same
 payment automatically: when the booked slot carries a fee, the function
@@ -278,35 +289,22 @@ what they owe and what the clinic settled.
 
 **VIDEO and TELE (audio) consultations** have a **Join Video Call** button in
 the appointment details sheet (both the patient's My Appointments and the
-doctor's Appointments tab — they share the sheet). It starts the meeting
-through the vendored **`google_meet_sdk`** (`third_party/google_meet_sdk/`):
+doctor's Appointments tab — they share the sheet). Every consultation uses
+**one fixed static Google Meet room** — `https://meet.google.com/rnz-wivx-yze`
+(`kStaticMeetLink` in `lib/services/meet_consult_service.dart`):
 
-1. **Google Sign-In** — the user picks their Google account (requests the
-   Calendar scopes the SDK needs).
-2. **Calendar event with a Meet conference** is created on their primary
-   calendar (title = consultation type + doctor, window = the booked slot
-   or now→+30 min).
-3. The returned `meet.google.com/<conferenceId>` link **opens externally**
-   in the browser / Google Meet app — the SDK has no in-app meeting view,
-   so joining always leaves the app.
+1. **Every new appointment is created with that link pre-filled** in its
+   `meet_link` column — the Flutter booking flow and the booking-page
+   Edge Function both write the same value, so both sides always join
+   the same room.
+2. **Joining always opens that room** in the browser / Google Meet app (the
+   link stored on the appointment when one exists, the static link
+   otherwise for legacy rows) — joining leaves the app so the meeting
+   runs in the browser / Meet app. No Google Sign-In or Calendar API is
+   involved anymore, on mobile or web.
 
-**Setup** (outside the repo):
-- Google Calendar API enabled in GCP, Firebase Auth with **Google Sign-In**
-  enabled, and the app's SHA-1 registered on the Firebase Android app.
-- The OAuth **web client ID** (from `android/app/google-services.json`,
-  `oauth_client` with `client_type` 3) is wired both as the
-  `clientId` meta-data in `AndroidManifest.xml` and in code at
-  `lib/services/meet_consult_service_io.dart` — they must stay in sync.
-
-**Vendored** (same pattern as `quantupi`): upstream `google_meet_sdk`
-0.0.3 pins `http ^0.13.5` and a Dart `<3.0.0` SDK, so it cannot resolve
-against this project (http 1.x, Dart 3.10); the vendored copy raises the
-constraints, upgrades `google_sign_in` to 7.x (singleton + `authenticate`
-API), and replaces the fragile manifest read with a settable clientId.
-On **web** the SDK can't run (Google Sign-In needs native config), so the
-web build only opens a meeting link already stored on the appointment —
-meetings themselves must be started from the mobile app. The old
-fixed-room / in-app-WebView logic is completely removed.
+The vendored `google_meet_sdk` (`third_party/google_meet_sdk/`) is kept
+in the repo but no longer used by the app code.
 
 ## One Active Booking Per Doctor
 

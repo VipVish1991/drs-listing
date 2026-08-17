@@ -4,6 +4,13 @@ import '../models/appointment_model.dart';
 import 'meet_consult_service_web.dart'
     if (dart.library.io) 'meet_consult_service_io.dart' as impl;
 
+/// The single static Google Meet room shared by every consultation in the
+/// app. New appointments are created with this link pre-filled in their
+/// `meet_link` column (Flutter app + booking-page Edge Function), and both
+/// the Join and Start flows open exactly this room — no per-meeting Google
+/// Calendar event is created anymore.
+const String kStaticMeetLink = 'https://meet.google.com/rnz-wivx-yze';
+
 /// Result of a join-meeting attempt.
 class MeetJoinResult {
   final bool success;
@@ -21,13 +28,11 @@ class MeetJoinResult {
 
 /// Facade over the platform-specific Google Meet consultation flow.
 ///
-/// On mobile ([meet_consult_service_io]) the flow uses the vendored
-/// `google_meet_sdk`: Google Sign-In → create a Meet-backed calendar event
-/// → open the returned `meet.google.com/<id>` link in the browser/Meet app
-/// (the SDK has no in-app meeting view). On web the SDK can't run (Google
-/// Sign-In needs Firebase web config), so the web implementation only
-/// opens a meeting link that was already stored on the appointment — the
-/// meeting itself must be created from the mobile app.
+/// Every consultation uses ONE fixed static room — [kStaticMeetLink] — so
+/// the patient and the clinic always end up in the same meeting. On mobile
+/// ([meet_consult_service_io]) and web the flow simply opens that room
+/// (the link stored on the appointment when one exists, the static link
+/// otherwise). No Google Sign-In or calendar-event creation is involved.
 class MeetConsultService {
   MeetConsultService._();
 

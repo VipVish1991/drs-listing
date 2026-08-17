@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is used to scan the patient's UPI QR code for online refunds.</string>
 	<key>CFBundleDisplayName</key>
 	<string>Drs Listing</string>
 	<key>CFBundleExecutable</key>
@@ -65,9 +67,14 @@
 	     the UPI app list comes back empty. -->
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
-		<string>gpay</string>
+		<string>amazonpay</string>
 		<string>phonepe</string>
+		<string>gpay</string>
+		<string>cred</string>
 		<string>paytm</string>
+		<string>bhimupi</string>
+		<string>hdfcbank</string>
+		<string>sbiupi</string>
 		<string>upi</string>
 		<string>tez</string>
 		<string>bhim</string>

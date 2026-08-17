@@ -375,24 +375,38 @@ class SupabaseService {
   }
 
   /// Flip a payment's status (e.g. an offline 'Pending' → 'Paid' /
-  /// 'Refunded'). Runs with the `x-user-id` header; the payments UPDATE
-  /// RLS policy for doctors (owned clinic) permits only `payment_status` /
-  /// `paid_at` / `updated_at` to be written. Returns `true` only when the
-  /// row actually came back — a silent RLS denial (0 rows) is reported as
-  /// `false` so the UI never claims a payment was settled that wasn't
-  /// (same contract as [updateUserName]).
+  /// 'Refunded', or a 'Paid' row → 'Refunded'). Runs with the `x-user-id`
+  /// header; the payments UPDATE RLS policy for doctors (owned clinic)
+  /// permits only `payment_status` / `paid_at` / `updated_at` and the
+  /// refund columns to be written. [refundMethod] / [refundedAt] /
+  /// [refundUpiId] / [refundTransactionId] / [refundRawResponse] record
+  /// HOW an online/cash refund was given back (see the refund_details
+  /// migration). Returns `true` only when the row actually came back — a
+  /// silent RLS denial (0 rows) is reported as `false` so the UI never
+  /// claims a payment was settled that wasn't (same contract as
+  /// [updateUserName]).
   Future<bool> updatePaymentStatus(
     String userId,
     String paymentId, {
     required String status,
     DateTime? paidAt,
+    String? refundMethod,
+    DateTime? refundedAt,
+    String? refundUpiId,
+    String? refundTransactionId,
+    String? refundRawResponse,
   }) async {
     final rows = await _withUsersContext(
       usersContextHeaders(userId: userId),
       () async {
         return client.from('payments').update({
           'payment_status': status,
-          if (paidAt != null) 'paid_at': paidAt.toUtc().toIso8601String(),
+          'paid_at': ?paidAt?.toUtc().toIso8601String(),
+          'refund_method': ?refundMethod,
+          'refunded_at': ?refundedAt?.toUtc().toIso8601String(),
+          'refund_upi_id': ?refundUpiId,
+          'refund_transaction_id': ?refundTransactionId,
+          'refund_raw_response': ?refundRawResponse,
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         }).eq('id', paymentId).select();
       },

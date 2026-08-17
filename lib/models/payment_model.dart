@@ -32,6 +32,18 @@ class PaymentModel {
   /// The complete raw UPI response string, stored verbatim for disputes.
   final String? rawResponse;
   final DateTime? paidAt;
+  /// How a refund was given back — 'online' (UPI to the patient) or
+  /// 'cash' (at the clinic). Null when the payment was never refunded.
+  final String? refundMethod;
+  /// When the refund was issued (online = confirmed UPI success; cash =
+  /// clinic confirmation).
+  final DateTime? refundedAt;
+  /// Patient UPI VPA the online refund was sent to (online refunds only).
+  final String? refundUpiId;
+  /// UPI transaction id / approval ref of the REFUND payment (online only).
+  final String? refundTransactionId;
+  /// Raw UPI response of the refund payment, stored verbatim (online only).
+  final String? refundRawResponse;
   final DateTime? createdAt;
 
   const PaymentModel({
@@ -56,6 +68,11 @@ class PaymentModel {
     this.upiAppId,
     this.rawResponse,
     this.paidAt,
+    this.refundMethod,
+    this.refundedAt,
+    this.refundUpiId,
+    this.refundTransactionId,
+    this.refundRawResponse,
     this.createdAt,
   });
 
@@ -67,6 +84,14 @@ class PaymentModel {
   /// Human-readable payment method: 'Online (UPI)' / 'Offline (Clinic)'.
   String get paymentMethodLabel =>
       paymentMethod == 'online' ? 'Online (UPI)' : 'Offline (Clinic)';
+
+  /// Human-readable refund method: 'Online (UPI)' / 'Cash'. Null when the
+  /// payment was never refunded.
+  String? get refundMethodLabel => switch (refundMethod) {
+        'online' => 'Online (UPI)',
+        'cash' => 'Cash',
+        _ => null,
+      };
 
   /// Human-readable consultation type (matches the booking screen's
   /// labels): 'Tele Consultation' | 'Video Consultation' |
@@ -119,6 +144,10 @@ class PaymentModel {
       txnRef: json['txn_ref']?.toString(),
       upiAppId: json['upi_app_id']?.toString(),
       rawResponse: json['raw_response']?.toString(),
+      refundMethod: json['refund_method']?.toString(),
+      refundUpiId: json['refund_upi_id']?.toString(),
+      refundTransactionId: json['refund_transaction_id']?.toString(),
+      refundRawResponse: json['refund_raw_response']?.toString(),
       // The DB stores TIMESTAMPTZ, so PostgREST returns UTC ISO strings
       // (…Z). DateTime.tryParse keeps the UTC zone, which would display
       // 5:30h off local time everywhere (cards, details sheet, CSV,
@@ -126,6 +155,9 @@ class PaymentModel {
       // consumer shows the user's own timezone.
       paidAt: json['paid_at'] != null
           ? DateTime.tryParse(json['paid_at'].toString())?.toLocal()
+          : null,
+      refundedAt: json['refunded_at'] != null
+          ? DateTime.tryParse(json['refunded_at'].toString())?.toLocal()
           : null,
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'].toString())?.toLocal()
@@ -172,6 +204,13 @@ class PaymentModel {
       if (upiAppId != null) 'upi_app_id': upiAppId,
       if (rawResponse != null) 'raw_response': rawResponse,
       if (paidAt != null) 'paid_at': paidAt!.toUtc().toIso8601String(),
+      if (refundMethod != null) 'refund_method': refundMethod,
+      if (refundedAt != null)
+        'refunded_at': refundedAt!.toUtc().toIso8601String(),
+      if (refundUpiId != null) 'refund_upi_id': refundUpiId,
+      if (refundTransactionId != null)
+        'refund_transaction_id': refundTransactionId,
+      if (refundRawResponse != null) 'refund_raw_response': refundRawResponse,
     };
   }
 
@@ -180,6 +219,11 @@ class PaymentModel {
     String? paymentStatus,
     String? transactionId,
     DateTime? paidAt,
+    String? refundMethod,
+    DateTime? refundedAt,
+    String? refundUpiId,
+    String? refundTransactionId,
+    String? refundRawResponse,
   }) {
     return PaymentModel(
       id: id,
@@ -201,6 +245,11 @@ class PaymentModel {
       upiAppId: upiAppId,
       rawResponse: rawResponse,
       paidAt: paidAt ?? this.paidAt,
+      refundMethod: refundMethod ?? this.refundMethod,
+      refundedAt: refundedAt ?? this.refundedAt,
+      refundUpiId: refundUpiId ?? this.refundUpiId,
+      refundTransactionId: refundTransactionId ?? this.refundTransactionId,
+      refundRawResponse: refundRawResponse ?? this.refundRawResponse,
       createdAt: createdAt,
     );
   }

@@ -1,25 +1,22 @@
-import 'dart:typed_data';
-
-import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:get/get.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../config/theme.dart';
 import '../../controllers/doctor_controller.dart';
 import '../../models/appointment_model.dart';
 import '../../models/payment_model.dart';
+import '../../services/quantupi_payment_service.dart';
 import '../../routes/app_routes.dart';
-import '../../services/supabase_service.dart';
 import '../../utils/appointment_dialogs.dart';
-import '../../utils/image_optimizer.dart';
+import '../../utils/doctor_appointment_actions.dart';
 import '../../utils/snackbar_helpers.dart';
+import '../../utils/upi_qr_parser.dart';
 import '../../widgets/appointment_date_filter.dart';
 import '../../widgets/appointment_details_sheet.dart';
 import '../../widgets/appointment_info_card.dart';
 import '../../widgets/appointment_search.dart';
-import '../../widgets/image_processing_dialog.dart';
+import '../../widgets/upi_qr_scanner_screen.dart';
 
 class DoctorAppointmentsScreen extends StatefulWidget {
   const DoctorAppointmentsScreen({super.key});
@@ -43,6 +40,14 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
   String _searchQuery = '';
 
   final TextEditingController _searchController = TextEditingController();
+
+  /// Session-level memory of an online refund the UPI app CONFIRMED but
+  /// whose payment record failed to update. Keyed by payment id: a later
+  /// Refund tap on the same payment must RETRY THE RECORD — never send a
+  /// second refund to the patient. (In-memory only — if the app is killed
+  /// and relaunched the payment still shows Paid, so the clinic should
+  /// verify with the patient before re-sending.)
+  final Map<String, _PendingOnlineRefund> _unrecordedOnlineRefunds = {};
 
   @override
   void initState() {
@@ -81,412 +86,12 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
     return trimmed.isNotEmpty ? trimmed[0].toUpperCase() : 'P';
   }
 
-  void _handleCancel(AppointmentModel a) {
-    Get.dialog(
-      AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Cancel Appointment'),
-        content: Text('Cancel appointment with ${a.patientName ?? 'patient'}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back(),
-            child: Text('Keep', style: TextStyle(color: AppColors.textCaption)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              _controller.updateAppointmentStatus(a.appointmentId, 'Cancelled');
-              Get.back();
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
+  Future<bool?> _handleCancel(AppointmentModel a) =>
+      showCancelAppointmentDialog(_controller, a);
 
-  void _handleComplete(AppointmentModel a) {
-    // Every consultation type (In-Clinic included) offers the camera
-    // prescription upload when the doctor marks the appointment complete;
-    // "Choose from Gallery" picks an existing photo instead, and
-    // "Complete without Prescription" stays available as a fallback.
-    Get.dialog(
-      Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: AppColors.bgCard,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 24, 22, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      AppColors.success.withAlpha(30),
-                      AppColors.success.withAlpha(10),
-                    ],
-                  ),
-                ),
-                child: const Icon(
-                  Icons.medication_rounded,
-                  size: 32,
-                  color: AppColors.success,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Complete Appointment',
-                style: TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textHeading,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                a.consultationTypeLabel != null
-                    ? '${a.consultationTypeLabel} with ${a.patientName ?? 'patient'}.'
-                          ' Upload the prescription photo to share it with the patient.'
-                    : 'Complete the appointment with ${a.patientName ?? 'patient'}.'
-                          ' Upload the prescription photo to share it with the patient.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  height: 1.5,
-                  color: AppColors.textBody,
-                ),
-              ),
-              const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Get.back();
-                    _startPrescriptionUpload(a, source: ImageSource.camera);
-                  },
-                  icon: const Icon(Icons.photo_camera_rounded, size: 18),
-                  label: const Text(
-                    'Upload Prescription & Complete',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.success,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    Get.back();
-                    _startPrescriptionUpload(a, source: ImageSource.gallery);
-                  },
-                  icon: const Icon(Icons.photo_library_rounded, size: 18),
-                  label: const Text(
-                    'Choose from Gallery',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13.5,
-                      color: AppColors.success,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.success,
-                    side: BorderSide(color: AppColors.success.withAlpha(60)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: OutlinedButton(
-                  onPressed: () {
-                    Get.back();
-                    _controller.updateAppointmentStatus(
-                      a.appointmentId,
-                      'Completed',
-                    );
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textCaption,
-                    side: BorderSide(
-                      color: AppColors.textCaption.withAlpha(60),
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  child: const Text(
-                    'Complete without Prescription',
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Future<bool?> _handleComplete(AppointmentModel a) =>
+      showCompleteAppointmentDialog(_controller, a);
 
-  /// Camera/gallery → preview → upload → complete flow for Tele/Video
-  /// consultations. [source] selects where the prescription photo comes
-  /// from: the camera ([ImageSource.camera]) or an existing image in the
-  /// device gallery ([ImageSource.gallery]). Both paths run the SAME
-  /// processing dialog + 9:16 preview + upload pipeline.
-  Future<void> _startPrescriptionUpload(
-    AppointmentModel a, {
-    ImageSource source = ImageSource.camera,
-  }) async {
-    final doctorPlaceId =
-        _controller.currentDoctor.value?.placeId ??
-        (a.doctorDetails?['place_id']?.toString() ?? '');
-    try {
-      final picked = await ImagePicker().pickImage(
-        source: source,
-        maxWidth: 3000,
-        imageQuality: 85,
-      );
-      if (picked == null || !mounted) return;
-
-      // Feedback between the photo capture/pick and the preview sheet: the
-      // decode + 9:16 portrait padding + downscale (compute isolate) can
-      // take a moment on large photos, so show the processing dialog
-      // before it instead of leaving a dead pause.
-      ImageProcessingDialog.show();
-
-      final bytes = await picked.readAsBytes();
-
-      final uploadBytes =
-          (await compute(PrescriptionImageOptimizer.optimizePortrait, bytes)) ??
-          bytes;
-
-      // Processing done — dismiss the loading dialog (regardless of
-      // mounted: it lives on the navigator, not this widget) before
-      // opening the preview sheet.
-      if (Get.isDialogOpen ?? false) Get.back();
-      if (!mounted) return;
-
-      final shouldUpload = await _showPrescriptionPreview(a, uploadBytes);
-      if (shouldUpload != true || !mounted) return;
-
-      final result = await Get.dialog<String?>(
-        PrescriptionUploadDialog(
-          upload: () => SupabaseService().uploadPrescriptionImage(
-            a.appointmentId,
-            doctorPlaceId: doctorPlaceId,
-            bytes: uploadBytes,
-          ),
-        ),
-        barrierDismissible: false,
-      );
-      if (!mounted) return;
-
-      if (result == kCompleteWithoutPrescription) {
-        await _controller.updateAppointmentStatus(a.appointmentId, 'Completed');
-        if (mounted) {
-          showErrorSnackbar(
-            'Appointment completed, but the prescription upload failed',
-          );
-        }
-      } else if (result != null && result.isNotEmpty) {
-        await _controller.completeAppointmentWithPrescription(a.appointmentId, [
-          result,
-        ]);
-        if (mounted) {
-          showSuccessSnackbar('Appointment completed & prescription uploaded');
-        }
-      }
-    } catch (_) {
-      // Close any open overlay (processing dialog / preview sheet) even if
-      // this screen unmounted meanwhile — dialogs live on the navigator,
-      // not on this widget, so they must not leak.
-      Get.back();
-      if (mounted) {
-        showErrorSnackbar(
-          source == ImageSource.gallery
-              ? 'Could not open the gallery. Please try again.'
-              : 'Could not open the camera. Please try again.',
-        );
-      }
-    }
-  }
-
-  Future<bool?> _showPrescriptionPreview(AppointmentModel a, Uint8List bytes) {
-    return Get.bottomSheet<bool>(
-      Container(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-        decoration: const BoxDecoration(
-          color: AppColors.bgMain,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.textCaption.withAlpha(90),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      color: AppColors.success.withAlpha(18),
-                    ),
-                    child: const Icon(
-                      Icons.medication_rounded,
-                      size: 20,
-                      color: AppColors.success,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'Prescription Preview',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textHeading,
-                      ),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => Get.back(result: false),
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: AppColors.textCaption.withAlpha(15),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.close_rounded,
-                        size: 18,
-                        color: AppColors.textCaption,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              // Full-height 9:16 portrait frame showing the COMPLETE page —
-              // the upload bytes are padded to a 9:16 white canvas by
-              // PrescriptionImageOptimizer (letterboxed, never cropped), so
-              // BoxFit.contain fills the frame edge-to-edge: the white bars
-              // read as page margins and the whole prescription is visible.
-              ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: AspectRatio(
-                  aspectRatio: 9 / 16,
-                  child: Image.memory(bytes, fit: BoxFit.contain),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'For ${a.patientName ?? 'patient'} — ${a.displayDate ?? ''} '
-                '${a.appointmentTime ?? ''}',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  color: AppColors.textCaption,
-                ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: SizedBox(
-                      height: 48,
-                      child: OutlinedButton.icon(
-                        onPressed: () => Get.back(result: false),
-                        icon: const Icon(Icons.replay_rounded, size: 18),
-                        label: const Text(
-                          'Retake',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.textCaption,
-                          side: BorderSide(
-                            color: AppColors.textCaption.withAlpha(60),
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: SizedBox(
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        onPressed: () => Get.back(result: true),
-                        icon: const Icon(Icons.cloud_upload_rounded, size: 18),
-                        label: const Text(
-                          'Upload & Complete',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.success,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-    );
-  }
 
   void _handleConfirm(AppointmentModel a) {
     showConfirmAppointmentDialog(_controller, a);
@@ -499,15 +104,42 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
     _confirmPaymentAction(a, p, status: 'Paid');
   }
 
-  /// "Refund" confirm — flips an offline Pending payment to Refunded.
-  void _handleRefund(AppointmentModel a, PaymentModel p) {
-    _confirmPaymentAction(a, p, status: 'Refunded');
+  /// "Refund" — opens the refund method picker (Online UPI / Cash), then
+  /// records the refunded payment in Supabase with the chosen details.
+  Future<void> _handleRefund(AppointmentModel a, PaymentModel p) async {
+    // A refund was ALREADY sent for this payment earlier in this session
+    // (the UPI app confirmed it) but the payment record could not be
+    // updated. Tapping Refund again must NEVER fire a second UPI refund —
+    // retry recording the sent refund instead.
+    final pending = _unrecordedOnlineRefunds[p.id];
+    if (pending != null) {
+      await _retryUnrecordedOnlineRefund(a, p, pending);
+      return;
+    }
+    final method = await _showRefundMethodSheet(a, p);
+    if (method == null || !mounted) return;
+    if (method == 'cash') {
+      _confirmPaymentAction(
+        a,
+        p,
+        status: 'Refunded',
+        refundMethod: 'cash',
+        refundedAt: DateTime.now(),
+      );
+    } else {
+      await _runOnlineRefund(a, p);
+    }
   }
 
   void _confirmPaymentAction(
     AppointmentModel a,
     PaymentModel p, {
     required String status,
+    String? refundMethod,
+    DateTime? refundedAt,
+    String? refundUpiId,
+    String? refundTransactionId,
+    String? refundRawResponse,
   }) {
     final isPaid = status == 'Paid';
     // Tracks the in-flight server update so the confirm button shows a
@@ -550,6 +182,11 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
                         final ok = await _controller.markPaymentStatus(
                           p,
                           status,
+                          refundMethod: refundMethod,
+                          refundedAt: refundedAt,
+                          refundUpiId: refundUpiId,
+                          refundTransactionId: refundTransactionId,
+                          refundRawResponse: refundRawResponse,
                         );
                         if (!context.mounted) return;
                         Get.back();
@@ -578,6 +215,341 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
                         ),
                       )
                     : Text(isPaid ? 'Mark Paid' : 'Refund'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// Bottom sheet: how should the refund be given back — Online (the
+  /// clinic's UPI app pays the patient's VPA) or Cash (at the clinic).
+  /// Returns 'online' / 'cash', or null when dismissed.
+  Future<String?> _showRefundMethodSheet(AppointmentModel a, PaymentModel p) {
+    return Get.bottomSheet<String>(
+      Container(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
+        decoration: const BoxDecoration(
+          color: AppColors.bgMain,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.textCaption.withAlpha(90),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppColors.info.withAlpha(15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.currency_rupee_rounded,
+                      size: 22,
+                      color: AppColors.info,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Refund ${p.amountLabel}',
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textHeading,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'How should the refund reach '
+                          '${a.patientName ?? 'the patient'}?',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.textCaption,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              _RefundMethodTile(
+                icon: Icons.qr_code_2_rounded,
+                title: 'Online (UPI)',
+                subtitle: 'Send ${p.amountLabel} from your UPI app to the '
+                    'patient — enter the VPA from their UPI QR code',
+                color: AppColors.primary,
+                onTap: () => Get.back(result: 'online'),
+              ),
+              const SizedBox(height: 10),
+              _RefundMethodTile(
+                icon: Icons.payments_rounded,
+                title: 'Cash',
+                subtitle: 'Hand over ${p.amountLabel} at the clinic',
+                color: AppColors.success,
+                onTap: () => Get.back(result: 'cash'),
+              ),
+            ],
+          ),
+        ),
+      ),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+    );
+  }
+
+  /// Online refund: the clinic's UPI app pays the PATIENT's own VPA. The
+  /// payment is marked Refunded ONLY when the UPI app CONFIRMS the refund
+  /// ('success') — an unconfirmed payment never flips the status (same
+  /// rule as the booking flow), so a failed/cancelled refund is retried
+  /// instead of being recorded.
+  Future<void> _runOnlineRefund(AppointmentModel a, PaymentModel p) async {
+    final vpa = await _askPatientUpiVpa(a, p);
+    if (vpa == null || !mounted) return;
+
+    // Sends exactly like the booking flow: the Quantupi package fires the
+    // `upi://pay` intent and Android's system chooser lists every
+    // installed UPI app (GPay/PhonePe/Paytm/…) to send from.
+    final result = await QuantupiPaymentService.instance.pay(
+      receiverUpiId: vpa,
+      receiverName: a.patientName ?? 'Patient',
+      amount: p.amount,
+      transactionRef: 'RFD${DateTime.now().millisecondsSinceEpoch}',
+      note: 'Refund — ${a.appointmentId}',
+    );
+    if (!mounted) return;
+
+    if (result.isSuccess) {
+      // The money LEFT the clinic — the record must land, or a later
+      // Refund tap would send a second refund. Retry the write (it is
+      // idempotent: same refund txn) and, if it still fails, remember the
+      // sent refund so a re-tap retries the RECORD, never the payment.
+      final recorded = await _recordOnlineRefund(
+        p,
+        vpa: vpa,
+        transactionId: result.transactionId,
+        rawResponse: result.rawResponse,
+      );
+      if (recorded) {
+        _unrecordedOnlineRefunds.remove(p.id);
+        showSuccessSnackbar(
+          'Refund of ${p.amountLabel} sent — payment marked as Refunded',
+        );
+      } else {
+        // Payments shown on the cards always carry a server id.
+        _unrecordedOnlineRefunds[p.id!] = _PendingOnlineRefund(
+          vpa: vpa,
+          transactionId: result.transactionId,
+          rawResponse: result.rawResponse,
+        );
+        showErrorSnackbar(
+          'Refund of ${p.amountLabel} was sent to '
+          '${a.patientName ?? 'the patient'}, but the payment record could '
+          'not be updated. The refund is NOT recorded yet — do NOT send it '
+          'again. Tap Refund again to retry recording it.',
+        );
+      }
+    } else {
+      // Nothing was sent — the doctor can safely try again. For a
+      // 'submitted' (unconfirmed) payment the money MAY have gone out, so
+      // the message never tells them to just re-send.
+      showErrorSnackbar(
+        result.isSubmitted
+            ? 'Refund not confirmed by the UPI app yet — the payment was '
+                  'NOT marked as refunded. Check with the patient whether '
+                  'the refund arrived BEFORE sending it again.'
+            : 'Refund failed or was cancelled — nothing was sent and the '
+                  'payment was NOT marked as refunded. You can try again.',
+      );
+    }
+  }
+
+  /// Records an online refund that the UPI app CONFIRMED, retrying the
+  /// write a couple of times: a transient network/RLS failure right after
+  /// the money left must not strand the payment as Paid. The UPDATE is
+  /// idempotent (same refund transaction id), so retrying is safe.
+  /// Returns `true` only when the record landed server-side.
+  Future<bool> _recordOnlineRefund(
+    PaymentModel p, {
+    required String vpa,
+    String? transactionId,
+    String? rawResponse,
+  }) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final ok = await _controller.markPaymentStatus(
+        p,
+        'Refunded',
+        refundMethod: 'online',
+        refundedAt: DateTime.now(),
+        refundUpiId: vpa,
+        refundTransactionId: transactionId,
+        refundRawResponse: rawResponse,
+      );
+      if (ok) return true;
+      if (attempt < 2) {
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+      }
+    }
+    return false;
+  }
+
+  /// Re-entry point when a confirmed online refund could not be recorded:
+  /// retries ONLY the record write — a second UPI refund is never fired.
+  Future<void> _retryUnrecordedOnlineRefund(
+    AppointmentModel a,
+    PaymentModel p,
+    _PendingOnlineRefund pending,
+  ) async {
+    final recorded = await _recordOnlineRefund(
+      p,
+      vpa: pending.vpa,
+      transactionId: pending.transactionId,
+      rawResponse: pending.rawResponse,
+    );
+    if (!mounted) return;
+    if (recorded) {
+      _unrecordedOnlineRefunds.remove(p.id);
+      showSuccessSnackbar(
+        'Refund of ${p.amountLabel} recorded — payment marked as Refunded',
+      );
+    } else {
+      showErrorSnackbar(
+        'The payment record still could not be updated — the refund is NOT '
+        'recorded and was NOT sent again. Note the refund transaction '
+        '${pending.transactionId ?? '—'} and contact support.',
+      );
+    }
+  }
+
+  /// Asks for the patient's UPI ID (VPA) — the value their UPI QR code
+  /// encodes, or shown in their UPI app — so the clinic can send the
+  /// online refund to it. Returns the trimmed VPA, or null when dismissed.
+  Future<String?> _askPatientUpiVpa(AppointmentModel a, PaymentModel p) {
+    final vpaController = TextEditingController();
+    return Get.dialog<String>(
+      StatefulBuilder(
+        builder: (context, setState) {
+          final vpa = vpaController.text.trim();
+          final valid = vpa.isNotEmpty && vpa.contains('@');
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text('Refund via UPI'),
+            // Scrolls on small screens / large text instead of overflowing
+            // the fixed dialog height (the long instructions wrap to many
+            // lines at narrow widths).
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Ask the patient for their UPI ID (VPA) — shown in '
+                    'their UPI app, or scan their UPI QR code and enter '
+                    'the VPA it encodes. ${p.amountLabel} will be sent '
+                    'from your UPI app to ${a.patientName ?? 'the patient'}.',
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      height: 1.4,
+                      color: AppColors.textBody,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: vpaController,
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      labelText: 'Patient UPI ID (e.g. name@upi)',
+                      prefixIcon: const Icon(Icons.qr_code_2_rounded),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Scan the patient's UPI QR code and fill the field
+                  // with the VPA it encodes — no typing needed.
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final raw = await Get.to<String>(
+                          () => const UpiQrScannerScreen(),
+                        );
+                        if (raw == null || !mounted) return;
+                        final vpa = extractVpaFromQr(raw);
+                        if (vpa == null || !isValidVpa(vpa)) {
+                          showErrorSnackbar(
+                            'No UPI ID found in that QR code — ask the '
+                            'patient for their UPI ID and type it.',
+                          );
+                          return;
+                        }
+                        vpaController.text = vpa;
+                        setState(() {});
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        side: BorderSide(
+                          color: AppColors.primary.withAlpha(90),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.qr_code_scanner_rounded,
+                        size: 20,
+                      ),
+                      label: const Text("Scan Patient's UPI QR Code"),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Get.back(),
+                child: Text(
+                  'Cancel',
+                  style: TextStyle(color: AppColors.textCaption),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: valid ? () => Get.back(result: vpa) : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Send Refund'),
               ),
             ],
           );
@@ -747,6 +719,13 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
       );
       return;
     }
+    final payment = _controller.paymentsByAppointment[a.appointmentId];
+    // "Mark Completed" is gated on the consultation fee being settled —
+    // while the payment is still Pending (unpaid), the action renders
+    // disabled until the clinic marks it Paid (or Refunded), exactly like
+    // the card button.
+    final paymentPending =
+        payment != null && payment.paymentStatus == 'Pending';
     AppointmentDetailsSheet.show(
       appointment: a,
       displayStatus: _statusLabel(a.status),
@@ -755,7 +734,13 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
       phoneNumber: a.patientPhone ?? '',
       // Fee/payment recorded for this appointment (same map the cards use),
       // so the sheet shows what the consultation costs and how it stands.
-      payment: _controller.paymentsByAppointment[a.appointmentId],
+      payment: payment,
+      // Doctor actions right inside the sheet (same compact pills as the
+      // cards): mark the consultation complete or cancel it — handy right
+      // after the video meeting closes and the app returns.
+      showDoctorActions: true,
+      onCancel: () => _handleCancel(a),
+      onComplete: paymentPending ? null : () => _handleComplete(a),
       // Persist a newly created Meet link so the patient joins the same
       // room on their side.
       onSaveMeetLink: (link) =>
@@ -846,6 +831,14 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
                 payment != null &&
                 payment.paymentMethod == 'offline' &&
                 payment.paymentStatus == 'Pending';
+            // A payment is refundable when money actually changed hands
+            // (Paid — online or offline) OR when an offline fee is still
+            // outstanding (Pending, the legacy "not collected" refund).
+            final refundable =
+                payment != null &&
+                (payment.paymentStatus == 'Paid' ||
+                    (payment.paymentMethod == 'offline' &&
+                        payment.paymentStatus == 'Pending'));
             // "Mark Completed" is gated on the consultation fee being
             // settled: while the payment is still Pending (unpaid), the
             // button renders disabled until the clinic marks it Paid (or
@@ -867,7 +860,7 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
               onMarkPaid: payment != null && paymentActionable
                   ? () => _handleMarkPaid(a, payment)
                   : null,
-              onRefund: payment != null && paymentActionable
+              onRefund: payment != null && refundable
                   ? () => _handleRefund(a, payment)
                   : null,
               onTap: () => _showAppointmentDetails(a),
@@ -923,9 +916,10 @@ class _ModernAppointmentCard extends StatelessWidget {
   /// button then renders disabled instead of opening the complete flow.
   final VoidCallback? onComplete;
 
-  /// The payment recorded against this appointment (if any). Offline
-  /// Pending rows render Mark Paid / Refund actions; every other status
-  /// renders as an informational chip.
+  /// The payment recorded against this appointment (if any). Rows render
+  /// Mark Paid (offline Pending) and/or Refund (Paid — any method — or
+  /// offline Pending) actions; every other status renders as an
+  /// informational chip.
   final PaymentModel? payment;
   final VoidCallback? onMarkPaid;
   final VoidCallback? onRefund;
@@ -1031,8 +1025,8 @@ class _ModernAppointmentCard extends StatelessWidget {
   }
 
   /// Payment line between the info grid and the action buttons: amount +
-  /// status chip, plus Mark Paid / Refund actions when the row is an
-  /// OFFLINE Pending payment the clinic can settle.
+  /// status chip, plus Mark Paid (offline Pending) and/or Refund (Paid or
+  /// offline Pending) actions when the row can be settled.
   Widget _buildPaymentRow(PaymentModel p) {
     final color = p.paymentStatus == 'Paid'
         ? AppColors.success
@@ -1041,7 +1035,7 @@ class _ModernAppointmentCard extends StatelessWidget {
         : p.paymentStatus == 'Failed'
         ? AppColors.error
         : AppColors.warning;
-    final actionable = onMarkPaid != null;
+    final hasActions = onMarkPaid != null || onRefund != null;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1092,25 +1086,27 @@ class _ModernAppointmentCard extends StatelessWidget {
               ),
             ],
           ),
-          if (actionable) ...[
+          if (hasActions) ...[
             const SizedBox(height: 10),
             Wrap(
               spacing: 10,
               runSpacing: 8,
               children: [
-                _ModernActionBtn(
-                  label: 'Mark Paid',
-                  icon: Icons.check_circle_rounded,
-                  color: AppColors.success,
-                  onTap: onMarkPaid!,
-                  isPrimary: true,
-                ),
-                _ModernActionBtn(
-                  label: 'Refund',
-                  icon: Icons.currency_rupee_rounded,
-                  color: AppColors.info,
-                  onTap: onRefund!,
-                ),
+                if (onMarkPaid != null)
+                  _ModernActionBtn(
+                    label: 'Mark Paid',
+                    icon: Icons.check_circle_rounded,
+                    color: AppColors.success,
+                    onTap: onMarkPaid!,
+                    isPrimary: true,
+                  ),
+                if (onRefund != null)
+                  _ModernActionBtn(
+                    label: 'Refund',
+                    icon: Icons.currency_rupee_rounded,
+                    color: AppColors.info,
+                    onTap: onRefund!,
+                  ),
               ],
             ),
           ],
@@ -1120,174 +1116,94 @@ class _ModernAppointmentCard extends StatelessWidget {
   }
 }
 
-const String kCompleteWithoutPrescription = '__complete_without_prescription__';
 
-class PrescriptionUploadDialog extends StatefulWidget {
-  final Future<String?> Function() upload;
+/// An online refund the UPI app CONFIRMED but whose payment record has not
+/// been updated yet — the details needed to re-record it without sending
+/// money again.
+class _PendingOnlineRefund {
+  final String vpa;
+  final String? transactionId;
+  final String? rawResponse;
 
-  const PrescriptionUploadDialog({super.key, required this.upload});
-
-  @override
-  State<PrescriptionUploadDialog> createState() =>
-      _PrescriptionUploadDialogState();
+  const _PendingOnlineRefund({
+    required this.vpa,
+    this.transactionId,
+    this.rawResponse,
+  });
 }
 
-class _PrescriptionUploadDialogState extends State<PrescriptionUploadDialog> {
-  bool _uploading = true;
+/// One option row in the refund method sheet — icon + title + subtitle,
+/// tappable, tinted in [color].
+class _RefundMethodTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
 
-  @override
-  void initState() {
-    super.initState();
-    _runUpload();
-  }
-
-  Future<void> _runUpload() async {
-    String? url;
-    try {
-      url = await widget.upload();
-    } catch (_) {
-      url = null;
-    }
-    if (!mounted) return;
-    if (url != null && url.isNotEmpty) {
-      Get.back(result: url);
-      return;
-    }
-    setState(() => _uploading = false);
-  }
-
-  void _retry() {
-    setState(() => _uploading = true);
-    _runUpload();
-  }
+  const _RefundMethodTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      backgroundColor: AppColors.bgCard,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
-          switchInCurve: Curves.easeOut,
-          switchOutCurve: Curves.easeIn,
-          child: _uploading ? _buildProgress() : _buildError(),
+    return Material(
+      color: color.withAlpha(10),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color.withAlpha(16),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 20, color: color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textHeading,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        height: 1.3,
+                        color: AppColors.textCaption,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, size: 20, color: color),
+            ],
+          ),
         ),
       ),
     );
   }
-
-  Widget _buildProgress() {
-    return Column(
-      key: const ValueKey('upload_progress'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const SizedBox(
-          width: 34,
-          height: 34,
-          child: CircularProgressIndicator(
-            strokeWidth: 3,
-            color: AppColors.primary,
-          ),
-        ),
-        const SizedBox(height: 16),
-        const Text(
-          'Uploading prescription…',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textHeading,
-          ),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'Please wait a moment',
-          style: TextStyle(fontSize: 12.5, color: AppColors.textCaption),
-        ),
-        const SizedBox(height: 10),
-        TextButton(
-          onPressed: _popCancel,
-          child: Text('Cancel', style: TextStyle(color: AppColors.textCaption)),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildError() {
-    return Column(
-      key: const ValueKey('upload_error'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: AppColors.error.withAlpha(16),
-          ),
-          child: const Icon(
-            Icons.cloud_off_rounded,
-            size: 28,
-            color: AppColors.error,
-          ),
-        ),
-        const SizedBox(height: 14),
-        const Text(
-          'Upload failed',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textHeading,
-          ),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Could not upload the prescription.\nPlease check your connection and try again.',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 12.5,
-            height: 1.5,
-            color: AppColors.textCaption,
-          ),
-        ),
-        const SizedBox(height: 18),
-        SizedBox(
-          width: double.infinity,
-          height: 46,
-          child: ElevatedButton.icon(
-            onPressed: _retry,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text(
-              'Retry',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        TextButton(
-          onPressed: () => Get.back(result: kCompleteWithoutPrescription),
-          child: const Text(
-            'Complete without Prescription',
-            style: TextStyle(fontSize: 13, color: AppColors.textCaption),
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _popCancel() {
-    Get.back();
-  }
 }
+
 
 class _ModernActionBtn extends StatelessWidget {
   final String label;
@@ -1336,12 +1252,20 @@ class _ModernActionBtn extends StatelessWidget {
             children: [
               Icon(icon, size: 16, color: fg),
               const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: fg,
+              // Flexible + ellipsis: at large system text scales a Wrap
+              // can hand this row a constraint tighter than the label's
+              // intrinsic width — the label then shrinks instead of
+              // overflowing by a sub-pixel.
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: fg,
+                  ),
                 ),
               ),
             ],

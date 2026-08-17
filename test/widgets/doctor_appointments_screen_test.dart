@@ -11,6 +11,7 @@ import 'package:DrsListing/config/theme.dart';
 import 'package:DrsListing/controllers/doctor_controller.dart';
 import 'package:DrsListing/models/appointment_model.dart';
 import 'package:DrsListing/models/payment_model.dart';
+import 'package:DrsListing/services/quantupi_payment_service.dart';
 import 'package:DrsListing/routes/app_routes.dart';
 import 'package:url_launcher_platform_interface/link.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
@@ -91,6 +92,10 @@ class _TestDoctorController extends DoctorController {
   /// (appointmentId, status) pairs from the Mark Paid / Refund actions.
   final List<(String, String)> markedPayments = [];
 
+  /// (appointmentId, refundMethod) pairs from refund actions — records HOW
+  /// the refund was given back (online / cash) for assertions.
+  final List<(String, String)> refunds = [];
+
   /// Return value for [markPaymentStatus] — lets the failure path be tested.
   bool markPaymentResult = true;
 
@@ -109,8 +114,19 @@ class _TestDoctorController extends DoctorController {
   }
 
   @override
-  Future<bool> markPaymentStatus(PaymentModel payment, String status) async {
+  Future<bool> markPaymentStatus(
+    PaymentModel payment,
+    String status, {
+    String? refundMethod,
+    DateTime? refundedAt,
+    String? refundUpiId,
+    String? refundTransactionId,
+    String? refundRawResponse,
+  }) async {
     markedPayments.add((payment.appointmentId, status));
+    if (refundMethod != null) {
+      refunds.add((payment.appointmentId, refundMethod));
+    }
     if (markPaymentGate != null) return markPaymentGate!.future;
     return markPaymentResult;
   }
@@ -1060,7 +1076,8 @@ void main() {
           reason: 'payment chip must flip to Paid after the reload');
       expect(find.text('Pending'), findsNothing);
       expect(find.text('Mark Paid'), findsNothing);
-      expect(find.text('Refund'), findsNothing);
+      expect(find.text('Refund'), findsOneWidget,
+          reason: 'a Paid payment is refundable — Refund stays after settling');
 
       // Let the 'Payment marked as Paid' success snackbar auto-dismiss
       // before the completion step — a lingering overlay snackbar would
@@ -1276,8 +1293,8 @@ void main() {
         reason: 'the stale Pending chip must be gone');
     expect(find.text('Mark Paid'), findsNothing,
         reason: 'Mark Paid action must disappear once settled');
-    expect(find.text('Refund'), findsNothing,
-        reason: 'Refund action must disappear once settled');
+    expect(find.text('Refund'), findsOneWidget,
+        reason: 'a Paid payment is refundable — Refund stays after settling');
 
     await _settleAnimations(tester);
     await tester.pump(const Duration(seconds: 5));
@@ -1308,11 +1325,19 @@ void main() {
     expect(find.text('Pending'), findsOneWidget);
     expect(find.text('Refund'), findsOneWidget);
 
+    // New refund flow: Refund → method picker → Cash → confirm dialog.
     await tester.tap(find.text('Refund'));
     await tester.pumpAndSettle();
+    expect(find.text('Online (UPI)'), findsOneWidget);
+    expect(find.text('Cash'), findsOneWidget);
+    await tester.tap(find.text('Cash'));
+    await tester.pumpAndSettle();
+    expect(find.text('Refund Payment'), findsOneWidget);
     await tester.tap(find.widgetWithText(ElevatedButton, 'Refund'));
     await tester.pump();
     await tester.pumpAndSettle();
+    expect(controller.markedPayments, [('APT_REFUND', 'Refunded')]);
+    expect(controller.refunds, [('APT_REFUND', 'cash')]);
     expect(find.byType(Dialog), findsNothing);
 
     // Simulate the controller's post-flip reload of the payment map.
@@ -1373,14 +1398,20 @@ void main() {
       expect(find.byType(Dialog), findsNothing,
           reason: 'an unpaid appointment must not be completable');
 
-      // Step 2 — the clinic refunds the fee: Refund → confirm dialog.
+      // Step 2 — the clinic refunds the fee: Refund → method picker →
+      // Cash → confirm dialog.
       await tester.tap(find.text('Refund'));
+      await tester.pumpAndSettle();
+      expect(find.text('Online (UPI)'), findsOneWidget);
+      expect(find.text('Cash'), findsOneWidget);
+      await tester.tap(find.text('Cash'));
       await tester.pumpAndSettle();
       expect(find.text('Refund Payment'), findsOneWidget);
       await tester.tap(find.widgetWithText(ElevatedButton, 'Refund'));
       await tester.pump();
       await tester.pumpAndSettle();
       expect(controller.markedPayments, [('APT_REFUND_CHAIN', 'Refunded')]);
+      expect(controller.refunds, [('APT_REFUND_CHAIN', 'cash')]);
       expect(find.byType(Dialog), findsNothing);
 
       // Step 3 — the controller reloads the payment map (markPaymentStatus
@@ -1488,7 +1519,12 @@ void main() {
       payments: {'APT_PAY': paymentFor(appointmentId: 'APT_PAY', amount: 500)},
     );
 
+    // New refund flow: Refund → method picker → Cash → confirm dialog.
     await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    expect(find.text('Online (UPI)'), findsOneWidget);
+    expect(find.text('Cash'), findsOneWidget);
+    await tester.tap(find.text('Cash'));
     await tester.pumpAndSettle();
 
     expect(find.byType(Dialog), findsOneWidget);
@@ -1503,6 +1539,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(controller.markedPayments, [('APT_PAY', 'Refunded')]);
+    expect(controller.refunds, [('APT_PAY', 'cash')]);
     expect(find.byType(Dialog), findsNothing);
     expect(find.text('Payment marked as Refunded'), findsOneWidget);
 
@@ -1582,9 +1619,11 @@ void main() {
     // The card shows the settled fee as an informational chip.
     expect(find.text('Payment · ₹800'), findsOneWidget);
     expect(find.text('Paid'), findsOneWidget);
-    // No settle actions for an already-settled payment.
+    // Mark Paid is gone (nothing to collect), but a Paid payment is
+    // refundable — Refund stays available.
     expect(find.text('Mark Paid'), findsNothing);
-    expect(find.text('Refund'), findsNothing);
+    expect(find.text('Refund'), findsOneWidget,
+        reason: 'a Paid payment is refundable — Refund stays');
 
     // The fee was paid up-front, so Mark Completed is ENABLED (not the
     // greyed-out state a Pending payment would force).
@@ -1717,5 +1756,427 @@ void main() {
     expect(find.text('Tele Consultation'), findsOneWidget);
 
     await _settleAnimations(tester);
+  });
+
+  testWidgets('online refund: patient UPI VPA → UPI success → marked '
+      'Refunded with the refund details', (tester) async {
+    // Make the UPI service run the intent on the test host and return a
+    // CONFIRMED refund from the fake UPI app.
+    QuantupiPaymentService.forceAndroid = true;
+    QuantupiPaymentService.transactionOverride = (upi) async =>
+        'upi://pay?txnId=RFDREFUND123&responseCode=00&Status=SUCCESS';
+    addTearDown(() {
+      QuantupiPaymentService.forceAndroid = null;
+      QuantupiPaymentService.transactionOverride = null;
+    });
+
+    final controller = await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_REFUND_ONLINE',
+          patientName: 'Online Refund Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        // A PAID online payment — the money was collected, now refund it.
+        'APT_REFUND_ONLINE': paymentFor(
+          appointmentId: 'APT_REFUND_ONLINE',
+          amount: 800,
+          paymentStatus: 'Paid',
+          paymentMethod: 'online',
+        ),
+      },
+    );
+
+    // A Paid payment is refundable: the Refund action is present.
+    expect(find.text('Refund'), findsOneWidget);
+
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Online (UPI)'));
+    await tester.pumpAndSettle();
+
+    // The dialog asks for the patient's UPI ID (the value their UPI QR
+    // code encodes).
+    expect(find.text('Refund via UPI'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'patient@okhdfcbank');
+    await tester.pump();
+    await tester.tap(find.text('Send Refund'));
+    await tester.pumpAndSettle();
+
+    // The refund sends like the booking flow — the Quantupi package
+    // fires the intent and Android's system chooser lists the UPI apps.
+    // Only a CONFIRMED UPI refund flips the status — with the refund
+    // method + transaction details recorded.
+    expect(controller.markedPayments, [('APT_REFUND_ONLINE', 'Refunded')]);
+    expect(controller.refunds, [('APT_REFUND_ONLINE', 'online')]);
+    expect(find.textContaining('Refund of ₹800 sent'), findsOneWidget);
+
+    await _settleAnimations(tester);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('online refund: UPI failure does NOT mark the payment '
+      'refunded', (tester) async {
+    QuantupiPaymentService.forceAndroid = true;
+    QuantupiPaymentService.transactionOverride = (upi) async =>
+        'upi://pay?txnId=RFDX&Status=FAILURE';
+    addTearDown(() {
+      QuantupiPaymentService.forceAndroid = null;
+      QuantupiPaymentService.transactionOverride = null;
+    });
+
+    final controller = await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_REFUND_FAIL',
+          patientName: 'Fail Refund Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        'APT_REFUND_FAIL': paymentFor(
+          appointmentId: 'APT_REFUND_FAIL',
+          amount: 500,
+          paymentStatus: 'Paid',
+          paymentMethod: 'online',
+        ),
+      },
+    );
+
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Online (UPI)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'patient@okhdfcbank');
+    await tester.pump();
+    await tester.tap(find.text('Send Refund'));
+    await tester.pumpAndSettle();
+
+    // The refund was NOT confirmed — the payment stays untouched and the
+    // doctor is told it was not marked as refunded.
+    expect(controller.markedPayments, isEmpty);
+    expect(find.textContaining('NOT marked as refunded'), findsOneWidget);
+
+    await _settleAnimations(tester);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('refund flow UI audit: fits a 320×568 phone without overflow',
+      (tester) async {
+    // Small-phone surface — the same width class that has caught overflow
+    // on the doctor-side cards before.
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_UI_NARROW',
+          patientName: 'Narrow Screen Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        'APT_UI_NARROW': paymentFor(
+          appointmentId: 'APT_UI_NARROW',
+          amount: 500,
+        ),
+      },
+    );
+    // _pumpScreen re-applied the default 800×1600 surface — switch to the
+    // narrow phone before opening the flow.
+    tester.view.physicalSize = const Size(320, 568);
+    await tester.pump();
+
+    // Refund → method picker: both options on screen, no overflow.
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Online (UPI)'), findsOneWidget);
+    expect(find.text('Cash'), findsOneWidget);
+
+    // Cash → confirm dialog: no overflow.
+    await tester.tap(find.text('Cash'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Refund Payment'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Refund'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // Let the success snackbar dismiss before reopening the flow.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    // Online → VPA dialog (long instructions + input): no overflow, and
+    // the Send button only enables with a plausible VPA.
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Online (UPI)'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Refund via UPI'), findsOneWidget);
+    final sendBtn = find.widgetWithText(ElevatedButton, 'Send Refund');
+    expect(tester.widget<ElevatedButton>(sendBtn).onPressed, isNull);
+    await tester.enterText(find.byType(TextField), 'patient@okhdfcbank');
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(tester.widget<ElevatedButton>(sendBtn).onPressed, isNotNull);
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+
+    await _settleAnimations(tester);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('refund flow UI audit: renders at 1.5× text scale without '
+      'overflow', (tester) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+    await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_UI_SCALE',
+          patientName: 'Large Text Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        'APT_UI_SCALE': paymentFor(
+          appointmentId: 'APT_UI_SCALE',
+          amount: 500,
+        ),
+      },
+    );
+
+    // Method picker at 1.5× — scrolls, never overflows.
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    final e = tester.takeException();
+    if (e != null) {
+      debugPrint('REFUND UI OVERFLOW >>> $e');
+      if (e is FlutterError) {
+        for (final d in e.diagnostics) {
+          debugPrint('  REFUND UI OVERFLOW diag: $d');
+        }
+      }
+      throw e;
+    }
+    await tester.tap(find.text('Online (UPI)'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Refund via UPI'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'patient@okhdfcbank');
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+
+    await _settleAnimations(tester);
+  });
+
+  testWidgets("refund VPA dialog offers scanning the patient's UPI QR "
+      'code', (tester) async {
+    await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_SCAN_BTN',
+          patientName: 'Scan Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        'APT_SCAN_BTN': paymentFor(
+          appointmentId: 'APT_SCAN_BTN',
+          amount: 400,
+          paymentStatus: 'Paid',
+        ),
+      },
+    );
+
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Online (UPI)'));
+    await tester.pumpAndSettle();
+
+    // The dialog's QR option — on a real device this opens the camera
+    // scanner and fills the field with the scanned VPA.
+    expect(find.text('Refund via UPI'), findsOneWidget);
+    expect(find.text("Scan Patient's UPI QR Code"), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    await _settleAnimations(tester);
+  });
+
+  testWidgets('online refund: sends via the system chooser like the '
+      'booking flow (no in-app provider picker)', (tester) async {
+    QuantupiPaymentService.forceAndroid = true;
+    QuantupiPaymentService.transactionOverride = (upi) async =>
+        'upi://pay?txnId=RFD_CHOOSER&responseCode=00&Status=SUCCESS';
+    addTearDown(() {
+      QuantupiPaymentService.forceAndroid = null;
+      QuantupiPaymentService.transactionOverride = null;
+    });
+
+    final controller = await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_REFUND_CHOOSER',
+          patientName: 'Chooser Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        'APT_REFUND_CHOOSER': paymentFor(
+          appointmentId: 'APT_REFUND_CHOOSER',
+          amount: 600,
+          paymentStatus: 'Paid',
+        ),
+      },
+    );
+
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Online (UPI)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'patient@okhdfcbank');
+    await tester.pump();
+
+    // No extra provider step — Send Refund fires the UPI intent
+    // straight away (Android's system chooser lists all UPI apps).
+    await tester.tap(find.text('Send Refund'));
+    await tester.pumpAndSettle();
+    expect(find.text('System default chooser'), findsNothing);
+
+    expect(controller.markedPayments, [('APT_REFUND_CHOOSER', 'Refunded')]);
+    expect(find.textContaining('Refund of ₹600 sent'), findsOneWidget);
+
+    await _settleAnimations(tester);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('online refund: a sent-but-unrecorded refund NEVER re-sends '
+      '— tapping Refund again retries the record only', (tester) async {
+    // Count every UPI intent the flow fires — the double-refund guard must
+    // keep this at exactly 1 across BOTH Refund taps.
+    var payCalls = 0;
+    QuantupiPaymentService.forceAndroid = true;
+    QuantupiPaymentService.transactionOverride = (upi) async {
+      payCalls++;
+      return 'upi://pay?txnId=RFD_UNREC&responseCode=00&Status=SUCCESS';
+    };
+    addTearDown(() {
+      QuantupiPaymentService.forceAndroid = null;
+      QuantupiPaymentService.transactionOverride = null;
+    });
+
+    final controller = await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_REFUND_UNREC',
+          patientName: 'Unrecorded Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        'APT_REFUND_UNREC': paymentFor(
+          appointmentId: 'APT_REFUND_UNREC',
+          amount: 800,
+          paymentStatus: 'Paid',
+          paymentMethod: 'online',
+        ),
+      },
+    );
+
+    // The record write keeps failing — the UPI app already CONFIRMED the
+    // refund, so the money left the clinic.
+    controller.markPaymentResult = false;
+
+    // ── First attempt: refund sent, record write fails after 3 retries. ──
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Online (UPI)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'patient@okhdfcbank');
+    await tester.pump();
+    await tester.tap(find.text('Send Refund'));
+    // The VPA dialog pops, then the 3 record attempts run with 600ms
+    // retry pauses in between — advance the fake clock past them.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump();
+
+    expect(payCalls, 1, reason: 'exactly one UPI refund was sent');
+    expect(controller.refunds.length, 3,
+        reason: 'the record write retried 3 times');
+    // The doctor is told the money went out and NOT to send it again.
+    expect(find.textContaining('do NOT send it again'), findsOneWidget);
+    expect(find.textContaining('Tap Refund again to retry recording'),
+        findsOneWidget);
+
+    // Let the warning snackbar expire before tapping the card again.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    // ── Second Refund tap: must NOT fire a new UPI payment — it retries
+    //    recording the already-sent refund (now the write succeeds). ──
+    controller.markPaymentResult = true;
+    await tester.tap(find.text('Refund'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+
+    // No method picker (the guard intercepts before it), no second UPI
+    // intent — the record update alone ran and landed.
+    expect(find.text('Online (UPI)'), findsNothing);
+    expect(payCalls, 1,
+        reason: 're-tapping Refund must NEVER send a second refund');
+    expect(controller.refunds.length, 4,
+        reason: 'one more record attempt, no new payment');
+    expect(find.textContaining('payment marked as Refunded'), findsOneWidget);
+
+    await _settleAnimations(tester);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
   });
 }

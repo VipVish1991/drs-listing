@@ -116,11 +116,23 @@ class DoctorController extends GetxController {
     }
   }
 
-  /// Mark an offline payment Paid / Refunded from the appointments screen.
-  /// Reloads the payment map afterwards so the card updates in place.
-  /// Returns `true` only when the status flip actually landed server-side
-  /// — the UI must not claim a payment was settled that wasn't.
-  Future<bool> markPaymentStatus(PaymentModel payment, String status) async {
+  /// Mark a payment Paid / Refunded from the appointments screen. Reloads
+  /// the payment map afterwards so the card updates in place. Returns
+  /// `true` only when the status flip actually landed server-side — the UI
+  /// must not claim a payment was settled that wasn't.
+  ///
+  /// [refundMethod] / [refundedAt] / [refundUpiId] /
+  /// [refundTransactionId] / [refundRawResponse] record how an online or
+  /// cash refund was given back (see the refund_details migration).
+  Future<bool> markPaymentStatus(
+    PaymentModel payment,
+    String status, {
+    String? refundMethod,
+    DateTime? refundedAt,
+    String? refundUpiId,
+    String? refundTransactionId,
+    String? refundRawResponse,
+  }) async {
     final userId = Get.find<AuthController>().currentUser.value?.id;
     final paymentId = payment.id;
     if (userId == null || paymentId == null) return false;
@@ -130,6 +142,11 @@ class DoctorController extends GetxController {
         paymentId,
         status: status,
         paidAt: status == 'Paid' ? DateTime.now() : null,
+        refundMethod: refundMethod,
+        refundedAt: refundedAt,
+        refundUpiId: refundUpiId,
+        refundTransactionId: refundTransactionId,
+        refundRawResponse: refundRawResponse,
       );
       if (ok) await loadPayments();
       return ok;

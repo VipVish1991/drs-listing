@@ -84,6 +84,11 @@ const BOOKING_SECRET = Deno.env.get("BOOKING_SHARED_SECRET") ?? "";
 // function fire the doctor push after a web/QR booking lands.
 const NOTIFY_SECRET = Deno.env.get("NOTIFY_SHARED_SECRET") ?? "";
 
+// The single static Google Meet room used by every consultation in the
+// app. New appointments are created with it pre-filled in meet_link so
+// both the patient and the clinic always join the SAME meeting.
+const STATIC_MEET_LINK = "https://meet.google.com/rnz-wivx-yze";
+
 // "One active booking per doctor" gate: a patient may hold at most one
 // active (Pending/Upcoming) booking with a GIVEN doctor at a time. Other
 // doctors are never affected — the patient can book a different doctor
@@ -575,6 +580,9 @@ async function createBooking(
     appointment_date: dateKey,
     appointment_time: timeSlot,
     consultation_type: consultationType,
+    // Every new appointment carries the same static Google Meet room —
+    // both sides always join the SAME meeting.
+    meet_link: STATIC_MEET_LINK,
     status: "Pending",
   });
 
