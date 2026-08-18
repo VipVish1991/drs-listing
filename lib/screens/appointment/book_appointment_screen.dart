@@ -6,6 +6,7 @@ import '../../controllers/appointment_controller.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/doctor_controller.dart';
 import '../../models/doctor_model.dart';
+import '../../models/doctor_slot_model.dart';
 import '../../models/payment_model.dart';
 import '../../models/unavailable_range.dart';
 import '../../routes/app_routes.dart';
@@ -55,6 +56,13 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
 
   /// The time slot string the user tapped (e.g. "09:00 AM").
   String _selectedTimeSlot = '';
+
+  /// The consultation type ('tele' | 'video' | 'clinic') of the selected
+  /// time slot. Tracked alongside [_selectedTimeSlot] because the SAME
+  /// clock time can exist in several schedule types (e.g. a doctor running
+  /// Tele AND Video both at 9:00 AM) — deriving the type from the time
+  /// alone is ambiguous, so the tap carries its group's type.
+  String _selectedType = '';
 
   /// Whether slots are still loading.
   bool _slotsLoading = true;
@@ -210,15 +218,41 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     // Index 0 is always today — the 14-day list starts at DateTime.now().
     final today = dateOptions.first;
     if (_isDateUnavailable(today)) return;
-    final slots = _controller.getTimeSlotsForDay(today.dayOfWeek);
-    for (final slot in slots) {
-      if (_controller.isSlotBooked(today.isoDate, slot)) continue;
-      if (_controller.isSlotInPast(today.isoDate, slot)) continue;
-      _selectedDateIndex = 0;
-      _selectedTimeSlot = slot;
-      _controller.selectedDayOfWeek.value = today.dayOfWeek;
-      return;
+    for (final s in _daySchedules(today.dayOfWeek)) {
+      for (final slot in s.slots) {
+        if (_controller.isSlotBooked(today.isoDate, slot)) continue;
+        if (_controller.isSlotInPast(today.isoDate, slot)) continue;
+        _selectedDateIndex = 0;
+        _selectedTimeSlot = slot;
+        _selectedType = s.scheduleType;
+        _controller.selectedDayOfWeek.value = today.dayOfWeek;
+        return;
+      }
     }
+  }
+
+  /// The doctor's enabled, non-empty schedule rows for [dayOfWeek] in the
+  /// canonical display order (Tele → Video → In-Clinic). Each row keeps
+  /// its OWN slot list — rows are never merged, so a clock time that
+  /// exists in several consultation types appears in every group. (The old
+  /// view deduplicated times across types and mapped each time back to the
+  /// FIRST matching type, which collapsed overlapping types into a single
+  /// group — e.g. only "Video Consultation" ever showing.)
+  List<DoctorSlot> _daySchedules(String dayOfWeek) {
+    const order = ['tele', 'video', 'clinic'];
+    return _controller.doctorSlots
+        .where(
+          (s) =>
+              s.dayOfWeek == dayOfWeek &&
+              s.isEnabled &&
+              s.slots.isNotEmpty,
+        )
+        .toList()
+      ..sort(
+        (a, b) => order
+            .indexOf(a.scheduleType)
+            .compareTo(order.indexOf(b.scheduleType)),
+      );
   }
 
   /// True when [opt] falls inside one of the doctor's unavailable ranges.
@@ -299,8 +333,13 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     // 'success') books the appointment — an unconfirmed ('submitted')
     // payment never proceeds (see _runUpiPayment). A slot with no fee
     // books directly with no payment record.
-    final consultationType = _controller.getSlotTypeLabel(_selectedTimeSlot);
-    final fee = _slotFee(consultationType);
+    //
+    // The type comes from the GROUP the patient tapped (same clock time
+    // can exist in several types) and the fee from that day's own row.
+    final consultationType = _selectedType.isNotEmpty
+        ? _selectedType
+        : _controller.getSlotTypeLabel(_selectedTimeSlot);
+    final fee = _feeFor(selected.dayOfWeek, consultationType);
 
     // No fee — nothing to pay; book directly without a payment record.
     if (fee <= 0) {
@@ -1233,6 +1272,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
                           setState(() {
                             _selectedDateIndex = index;
                             _selectedTimeSlot = '';
+                            _selectedType = '';
                             _controller.selectedDayOfWeek.value = opt.dayOfWeek;
                           });
                         }
@@ -1263,7 +1303,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
         const SizedBox(height: 12),
         Obx(() {
           final dayOfWeek = _controller.selectedDayOfWeek.value;
-          final slots = _controller.getTimeSlotsForDay(dayOfWeek);
+          final schedules = _daySchedules(dayOfWeek);
           final selectedIsoDate = _selectedDateIndex >= 0
               ? dateOptions[_selectedDateIndex].isoDate
               : '';
@@ -1297,7 +1337,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
             );
           }
 
-          if (slots.isEmpty) {
+          if (schedules.isEmpty) {
             return Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
@@ -1326,20 +1366,17 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
             );
           }
 
-          // Group by schedule type
-          final Map<String, List<String>> grouped = {};
-          for (final slot in slots) {
-            final type = _controller.getSlotTypeLabel(slot);
-            grouped.putIfAbsent(type, () => []);
-            grouped[type]!.add(slot);
-          }
-
+          // One group PER schedule row — each type's own slots render
+          // under its own heading even when several types share the same
+          // clock times (the old deduped-first-match grouping collapsed
+          // overlapping types into a single group).
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: grouped.entries.map((entry) {
-              final typeEmoji = _typeEmoji(entry.key);
-              final typeLabel = _typeLabel(entry.key);
-              final typeColor = _typeColor(entry.key);
+            children: schedules.map((schedule) {
+              final type = schedule.scheduleType;
+              final typeEmoji = _typeEmoji(type);
+              final typeLabel = _typeLabel(type);
+              final typeColor = _typeColor(type);
               return Padding(
                 padding: const EdgeInsets.only(bottom: 18),
                 child: Column(
@@ -1366,7 +1403,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            '₹${_slotFee(entry.key)}',
+                            '₹${schedule.fee}',
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
@@ -1380,8 +1417,9 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: entry.value.map((timeSlot) {
-                        final isTimeSelected = _selectedTimeSlot == timeSlot;
+                      children: schedule.slots.map((timeSlot) {
+                        final isTimeSelected = _selectedTimeSlot == timeSlot &&
+                            _selectedType == type;
                         final isBooked = _controller.isSlotBooked(
                           selectedIsoDate,
                           timeSlot,
@@ -1394,9 +1432,10 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
                         return GestureDetector(
                           onTap: isDisabled
                               ? null
-                              : () => setState(
-                                  () => _selectedTimeSlot = timeSlot,
-                                ),
+                              : () => setState(() {
+                                    _selectedTimeSlot = timeSlot;
+                                    _selectedType = type;
+                                  }),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 200),
                             padding: const EdgeInsets.symmetric(
@@ -1847,6 +1886,20 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       default:
         return 0;
     }
+  }
+
+  /// The consultation fee for [type] on the SELECTED [dayOfWeek] — the
+  /// fee of that day's own schedule row (fees can differ per day), falling
+  /// back to the generic per-type default when no row exists.
+  int _feeFor(String dayOfWeek, String type) {
+    for (final s in _controller.doctorSlots) {
+      if (s.dayOfWeek == dayOfWeek &&
+          s.scheduleType == type &&
+          s.isEnabled) {
+        return s.fee;
+      }
+    }
+    return _slotFee(type);
   }
 }
 

@@ -79,13 +79,13 @@ class AppConstants {
   static String get notifyFunctionUrl =>
       '$supabaseUrl/functions/v1/notifications';
   static String bookingPageUrl(String placeId, {String? doctorName}) {
-    // booking.html is a REAL static file on GitHub Pages (returns HTTP 200
-    // to crawlers), with the placeId passed as ?doctor= — the booking page
-    // reads it from the query string. This replaced the pretty
-    // /book/<placeId> path, which GitHub Pages serves via 404.html with an
-    // HTTP 404 status (no server-side rewrites on Pages).
+    // Flutter web app deployed to GitHub Pages — the hash route
+    // #/web-booking loads the full booking screen with UPI payment,
+    // history, and cancel support. The ?doctor= param tells the app
+    // which doctor to load. The token preserves backward compat with
+    // the old Edge Function flow (ignored by the Flutter app).
     final buffer = StringBuffer(
-      '$bookingHost/booking.html'
+      '$bookingHost/#/web-booking'
       '?doctor=${Uri.encodeComponent(placeId)}'
       '&token=$bookingSharedSecret',
     );

@@ -24,6 +24,7 @@ import 'screens/profile/notification_center_screen.dart';
 import 'screens/profile/about_screen.dart';
 import 'screens/profile/help_screen.dart';
 import 'screens/profile/privacy_policy_screen.dart';
+import 'screens/web/web_booking_screen.dart';
 import 'screens/doctor/nearby_doctors_screen.dart';
 import 'screens/doctor/doctor_availability_screen.dart';
 import 'screens/doctor/doctor_main_shell.dart';
@@ -240,6 +241,10 @@ class _AppState extends State<App> with WidgetsBindingObserver {
         GetPage(
           name: AppRoutes.privacyPolicy,
           page: () => const PrivacyPolicyScreen(),
+        ),
+        GetPage(
+          name: AppRoutes.webBooking,
+          page: () => const WebBookingScreen(),
         ),
       ],
     );

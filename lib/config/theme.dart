@@ -71,10 +71,13 @@ class AppTheme {
         // apply via the flutter_statusbarcolor_ns plugin. MaterialApp uses
         // this as the default for every route; screens with dark surfaces
         // (e.g. the splash screen) override locally.
-        systemOverlayStyle: SystemUiOverlayStyle(
-          statusBarColor: Colors.white,
-          statusBarIconBrightness: Brightness.dark,
-          statusBarBrightness: Brightness.light,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          // Transparent so the teal gradient headers show through.
+          // Light icons/text on the dark gradient; screens with a
+          // white/light body override locally via AnnotatedRegion.
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.dark,
           systemNavigationBarColor: AppColors.bgMain,
           systemNavigationBarIconBrightness: Brightness.dark,
         ),

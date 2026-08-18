@@ -39,4 +39,7 @@ class AppRoutes {
   static const String about = '/about';
   static const String help = '/help';
   static const String privacyPolicy = '/privacy-policy';
+
+  // Web booking (browser / Flutter web)
+  static const String webBooking = '/web-booking';
 }

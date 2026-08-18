@@ -760,14 +760,22 @@ class AppointmentPaymentCard extends StatelessWidget {
               value: payment.transactionId!,
             ),
           // ── Refund details (when the clinic refunded this fee) — how
-          //    the money went back (Online UPI / Cash) and, for online
-          //    refunds, the refund's own UPI transaction id. ──
+          //    the money went back (Online UPI / Cash), when it happened,
+          //    and, for online refunds, the refund's own UPI transaction
+          //    id. ──
           if (payment.refundMethod != null)
             _PaymentInfoRow(
               icon: Icons.currency_exchange_rounded,
               color: AppColors.info,
               label: 'Refunded via',
               value: payment.refundMethodLabel ?? '—',
+            ),
+          if (payment.refundedAt != null)
+            _PaymentInfoRow(
+              icon: Icons.event_available_rounded,
+              color: AppColors.info,
+              label: 'Refunded on',
+              value: _dateLabel(payment.refundedAt!),
             ),
           if (payment.refundTransactionId != null)
             _PaymentInfoRow(

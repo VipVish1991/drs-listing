@@ -15,6 +15,11 @@ double paidIncomeOf(Iterable<PaymentModel> payments) =>
 double pendingIncomeOf(Iterable<PaymentModel> payments) =>
     _sumPaise(payments, (p) => p.paymentStatus == 'Pending');
 
+/// Sums the refunded consultation amounts from [payments] — the total
+/// that was sent back to patients via UPI or cash.
+double refundedTotalOf(Iterable<PaymentModel> payments) =>
+    _sumPaise(payments, (p) => p.paymentStatus == 'Refunded');
+
 double _sumPaise(
   Iterable<PaymentModel> payments,
   bool Function(PaymentModel) where,

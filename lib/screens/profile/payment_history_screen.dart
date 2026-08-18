@@ -459,7 +459,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
       }
     }
     final status = saved['status'];
-    if (status == 'Paid' || status == 'Pending') {
+    if (status == 'Paid' || status == 'Pending' || status == 'Refunded') {
       setState(() => _selectedStatus = status);
     }
     // An empty saved filter encodes "All" — nothing to restore.
@@ -686,6 +686,33 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
                 icon: Icons.event_rounded,
                 label: p.paidAt != null ? 'Paid on' : 'Recorded on',
                 value: _dateTimeLabel(paidOn),
+              ),
+            // ── Refund details (when the payment was refunded) ──
+            if (p.refundMethod != null) ...[
+              const SizedBox(height: 4),
+              _DetailRow(
+                icon: Icons.currency_exchange_rounded,
+                label: 'Refunded via',
+                value: p.refundMethodLabel ?? '—',
+              ),
+            ],
+            if (p.refundedAt != null)
+              _DetailRow(
+                icon: Icons.event_available_rounded,
+                label: 'Refunded on',
+                value: _dateTimeLabel(p.refundedAt!),
+              ),
+            if (p.refundTransactionId != null)
+              _DetailRow(
+                icon: Icons.receipt_long_rounded,
+                label: 'Refund txn ID',
+                value: p.refundTransactionId!,
+              ),
+            if (p.refundUpiId != null)
+              _DetailRow(
+                icon: Icons.account_balance_wallet_rounded,
+                label: 'Refund UPI ID',
+                value: p.refundUpiId!,
               ),
             const SizedBox(height: 8),
             SizedBox(
@@ -1015,6 +1042,14 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
                 pillKey: const Key('summary_pill_pending'),
                 isActive: _selectedStatus == 'Pending',
                 onTap: () => _toggleStatus('Pending'),
+              ),
+              _buildSummaryPill(
+                label: 'Refunded',
+                amount: refundedTotalOf(filtered),
+                color: const Color(0xFF60A5FA),
+                pillKey: const Key('summary_pill_refunded'),
+                isActive: _selectedStatus == 'Refunded',
+                onTap: () => _toggleStatus('Refunded'),
               ),
             ],
           ),

@@ -16,13 +16,21 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Parcelable;
 import android.util.Log;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
@@ -213,28 +221,47 @@ public class QuantupiPlugin implements FlutterPlugin, MethodCallHandler, PluginR
             return;
         }
 
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
-                activity, android.R.layout.select_dialog_item,
-                android.R.id.text1, labels) {
-            @Override
-            public View getView(int position, View convertView,
-                                ViewGroup parent) {
-                View view = super.getView(position, convertView, parent);
-                if (view instanceof TextView) {
-                    TextView tv = (TextView) view;
-                    Drawable icon = icons.get(position);
-                    if (icon != null) {
-                        int size = (int) (24 * activity.getResources()
-                                .getDisplayMetrics().density);
-                        icon.setBounds(0, 0, size, size);
-                        tv.setCompoundDrawables(icon, null, null, null);
-                        tv.setCompoundDrawablePadding((int) (16 * activity
-                                .getResources().getDisplayMetrics().density));
-                    }
-                }
-                return view;
-            }
-        };
+        // ── CUSTOM designed chooser (matches the app's teal-green look) ──
+        // The stock AlertDialog's black title bar + plain list looked
+        // foreign next to the app's rounded mint cards. This dialog is a
+        // white rounded card with a teal header, per-app rows (icon in a
+        // soft container + label), and a full-width Cancel pill.
+        // Root column: teal header + scrollable app list + Cancel pill.
+        LinearLayout root = new LinearLayout(activity);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.WHITE);
+
+        // Header — the app's teal gradient, white bold title + subtitle.
+        LinearLayout header = new LinearLayout(activity);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(20), dp(18), dp(20), dp(16));
+        GradientDrawable headerBg = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFF0B8A6F, 0xFF076B55});
+        // Round ONLY the top corners — the header sits at the top of the
+        // dialog's rounded card, so its own corners must follow the card's
+        // radius or the square teal corners would stick out.
+        headerBg.setCornerRadii(new float[]{
+                dp(20), dp(20), dp(20), dp(20), 0, 0, 0, 0});
+        header.setBackground(headerBg);
+
+        TextView title = new TextView(activity);
+        title.setText("Pay with");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        header.addView(title);
+
+        TextView subtitle = new TextView(activity);
+        subtitle.setText("Choose a UPI app to send the payment");
+        subtitle.setTextColor(Color.parseColor("#B3FFFFFF"));
+        subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        subLp.topMargin = dp(2);
+        header.addView(subtitle, subLp);
+        root.addView(header);
 
         // Guard: the dialog can be dismissed WITHOUT the Cancel button
         // (back key, tap-outside). Both paths must resolve the pending
@@ -242,38 +269,95 @@ public class QuantupiPlugin implements FlutterPlugin, MethodCallHandler, PluginR
         // (choosing an app dismisses the dialog too, and the UPI app's own
         // response must be what resolves the future then).
         final boolean[] launched = {false};
+
+        // The app list: one rounded row per UPI app. Built programmatically
+        // (no layout XML in this plugin) — icon in a soft mint container,
+        // label beside it. The rows get their click listeners AFTER the
+        // dialog exists (tapping one must dismiss the dialog, so the
+        // handler needs the dialog reference).
+        LinearLayout list = new LinearLayout(activity);
+        list.setOrientation(LinearLayout.VERTICAL);
+        final List<LinearLayout> rows = new ArrayList<>();
+        for (int i = 0; i < labels.size(); i++) {
+            final int index = i;
+            LinearLayout row = new LinearLayout(activity);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(16), dp(10), dp(16), dp(10));
+
+            // Icon in a soft mint rounded container.
+            FrameLayout iconWrap = new FrameLayout(activity);
+            GradientDrawable iconBg = new GradientDrawable();
+            iconBg.setColor(Color.parseColor("#E8F5F0"));
+            iconBg.setCornerRadius(dp(12));
+            iconWrap.setBackground(iconBg);
+            int box = dp(40);
+            iconWrap.setLayoutParams(new LinearLayout.LayoutParams(box, box));
+
+            ImageView iconView = new ImageView(activity);
+            Drawable icon = icons.get(index);
+            if (icon != null) {
+                int size = dp(22);
+                icon.setBounds(0, 0, size, size);
+                iconView.setImageDrawable(icon);
+            }
+            FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER);
+            iconWrap.addView(iconView, iconLp);
+            row.addView(iconWrap);
+
+            TextView label = new TextView(activity);
+            label.setText(labels.get(index));
+            label.setTextColor(Color.parseColor("#1A1D21"));
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            label.setTypeface(Typeface.create("sans-serif-medium",
+                    Typeface.NORMAL));
+            LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            labelLp.setMarginStart(dp(14));
+            row.addView(label, labelLp);
+
+            list.addView(row);
+            rows.add(row);
+        }
+        // Wrap the list in a ScrollView capped at ~6 rows so a phone with
+        // many UPI apps never overflows the screen (8+ apps would exceed
+        // small displays; the list scrolls instead).
+        ScrollView scroller = new ScrollView(activity);
+        scroller.setVerticalScrollBarEnabled(false);
+        scroller.addView(list);
+        int maxRows = Math.min(labels.size(), 6);
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(60) * maxRows);
+        root.addView(scroller, listLp);
+
+        // Full-width Cancel pill (teal outline style).
+        TextView cancel = new TextView(activity);
+        cancel.setText("Cancel");
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setTextColor(Color.parseColor("#0B8A6F"));
+        cancel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        cancel.setTypeface(Typeface.DEFAULT_BOLD);
+        cancel.setPadding(0, dp(14), 0, dp(14));
+        GradientDrawable cancelBg = new GradientDrawable();
+        cancelBg.setColor(Color.parseColor("#E8F5F0"));
+        cancelBg.setCornerRadius(dp(14));
+        cancel.setBackground(cancelBg);
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        cancelLp.setMargins(dp(16), dp(4), dp(16), dp(16));
+        root.addView(cancel, cancelLp);
+
+        // Dialog with rounded corners + white card background. Zero insets
+        // on the custom view so the teal header reaches the card's edges
+        // (AlertDialog's default padding would leave white gaps around it).
         AlertDialog dialog = new AlertDialog.Builder(activity)
-                .setTitle("Pay with")
-                .setAdapter(adapter, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dlg, int which) {
-                        launched[0] = true;
-                        activity.startActivityForResult(
-                                appIntents.get(which), uniqueRequestCode);
-                    }
-                })
-                .setNegativeButton("Cancel",
-                        new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface dlg,
-                                                int which) {
-                                // Take-and-clear BEFORE resolving: the
-                                // dialog dismisses right after this click
-                                // (firing onDismiss below), and a second
-                                // success() on the same MethodChannel
-                                // Result throws "Reply already submitted"
-                                // — which crashes the app (the user sees
-                                // the app exit). Clearing the pending slot
-                                // here makes that onDismiss a no-op,
-                                // exactly like the onActivityResult /
-                                // handleNewIntent double-delivery guard.
-                                MethodChannel.Result pending = finalResult;
-                                finalResult = null;
-                                if (pending != null) {
-                                    pending.success("user_canceled");
-                                }
-                            }
-                        })
+                .setView(root)
                 .setOnDismissListener(new DialogInterface.OnDismissListener() {
                     @Override
                     public void onDismiss(DialogInterface dlg) {
@@ -289,7 +373,81 @@ public class QuantupiPlugin implements FlutterPlugin, MethodCallHandler, PluginR
                     }
                 })
                 .create();
+        // AlertDialog's default padding would leave white gaps around the
+        // custom view — zero it out so the teal header + list span the
+        // whole rounded card.
+        dialog.setView(root, 0, 0, 0, 0);
+        if (dialog.getWindow() != null) {
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(Color.WHITE);
+            bg.setCornerRadius(dp(20));
+            dialog.getWindow().setBackgroundDrawable(bg);
+        }
+
+        // Attach the tap handlers NOW that the dialog exists — BOTH must
+        // dismiss the dialog. The old stock dialog auto-dismissed on item
+        // tap / Cancel (AlertDialog's setAdapter + setNegativeButton), but
+        // this custom view has no auto-dismiss, so without an explicit
+        // dismiss() the picker would stay on screen forever after the user
+        // picked an app or hit Cancel — exactly the "popup won't close"
+        // report.
+        //   • App row → dismiss, THEN launch that UPI app. The UPI app's
+        //     own response resolves the pending Dart future; the dismiss
+        //     fires onDismiss, which no-ops because launched[0] is true.
+        //   • Cancel → take-and-clear + resolve 'user_canceled' FIRST,
+        //     then dismiss. The dismiss fires onDismiss, but finalResult
+        //     is already null so it no-ops — no "Reply already submitted"
+        //     double-resolve crash.
+        for (int i = 0; i < rows.size(); i++) {
+            final int index = i;
+            rows.get(i).setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    launched[0] = true;
+                    dialog.dismiss();
+                    try {
+                        activity.startActivityForResult(
+                                appIntents.get(index), uniqueRequestCode);
+                    } catch (Exception e) {
+                        // The app vanished between the query and the tap
+                        // (uninstalled/disabled) — resolve as cancelled so
+                        // the booking flow never hangs.
+                        MethodChannel.Result pending = finalResult;
+                        finalResult = null;
+                        if (pending != null) {
+                            pending.success("user_canceled");
+                        }
+                    }
+                }
+            });
+        }
+        cancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // Take-and-clear BEFORE resolving: the dismiss below fires
+                // onDismiss, and a second success() on the same
+                // MethodChannel Result throws "Reply already submitted" —
+                // which crashes the app (the user sees the app exit).
+                // Clearing the pending slot here makes that onDismiss a
+                // no-op, exactly like the onActivityResult /
+                // handleNewIntent double-delivery guard.
+                MethodChannel.Result pending = finalResult;
+                finalResult = null;
+                if (pending != null) {
+                    pending.success("user_canceled");
+                }
+                dialog.dismiss();
+            }
+        });
+
         dialog.show();
+    }
+
+    /// Density-scaled dp → px helper for the programmatically built
+    /// chooser dialog (the plugin ships no layout resources).
+    private int dp(int value) {
+        return (int) (value * activity.getResources()
+                .getDisplayMetrics().density + 0.5f);
     }
 
     @Override

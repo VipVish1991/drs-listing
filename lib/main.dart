@@ -82,9 +82,9 @@ void main() async {
   // (where the bar itself is transparent over the app's light surfaces).
   // Every screen inherits this default; screens can override locally.
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.white,
-    statusBarIconBrightness: Brightness.dark,
-    statusBarBrightness: Brightness.light,
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    statusBarBrightness: Brightness.dark,
     systemNavigationBarColor: AppColors.bgMain,
     systemNavigationBarIconBrightness: Brightness.dark,
   ));

@@ -1823,7 +1823,8 @@ void main() {
   });
 
   testWidgets('online refund: UPI failure does NOT mark the payment '
-      'refunded', (tester) async {
+      'refunded when the doctor confirms it did not go through',
+      (tester) async {
     QuantupiPaymentService.forceAndroid = true;
     QuantupiPaymentService.transactionOverride = (upi) async =>
         'upi://pay?txnId=RFDX&Status=FAILURE';
@@ -1863,10 +1864,81 @@ void main() {
     await tester.tap(find.text('Send Refund'));
     await tester.pumpAndSettle();
 
-    // The refund was NOT confirmed — the payment stays untouched and the
-    // doctor is told it was not marked as refunded.
+    // A FAILURE response — the doctor must verify in their UPI app
+    // whether the refund actually went through. Saying it did NOT keeps
+    // the payment untouched.
+    expect(find.text('Refund not confirmed'), findsOneWidget);
+    await tester.tap(find.text('It did not go through'));
+    await tester.pumpAndSettle();
+
     expect(controller.markedPayments, isEmpty);
     expect(find.textContaining('NOT marked as refunded'), findsOneWidget);
+
+    await _settleAnimations(tester);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('online refund: UPI returns FAILURE but the doctor confirms '
+      'the refund went through → payment marked Refunded', (tester) async {
+    // The UPI app answered FAILURE even though the money actually moved
+    // (a known UPI intent-flow quirk). The doctor verifies in their UPI
+    // app and records the refund manually.
+    QuantupiPaymentService.forceAndroid = true;
+    QuantupiPaymentService.transactionOverride = (upi) async =>
+        'upi://pay?txnId=RFDUNCONF&Status=FAILURE';
+    addTearDown(() {
+      QuantupiPaymentService.forceAndroid = null;
+      QuantupiPaymentService.transactionOverride = null;
+    });
+
+    final controller = await _pumpScreen(
+      tester,
+      [
+        appointmentBasic(
+          appointmentId: 'APT_REFUND_CONFIRMED',
+          patientName: 'Confirmed Refund Patient',
+          appointmentDate: _todayKey(),
+          appointmentTime: '10:00 AM',
+          status: AppointmentStatus.upcoming,
+          doctorPlaceId: 'place_dash_1',
+        ),
+      ],
+      payments: {
+        'APT_REFUND_CONFIRMED': paymentFor(
+          appointmentId: 'APT_REFUND_CONFIRMED',
+          amount: 650,
+          paymentStatus: 'Paid',
+          paymentMethod: 'online',
+        ),
+      },
+    );
+
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Online (UPI)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'patient@okhdfcbank');
+    await tester.pump();
+    await tester.tap(find.text('Send Refund'));
+    await tester.pumpAndSettle();
+
+    // The UPI app did not confirm — the confirmation dialog explains and
+    // the doctor says it actually went through.
+    expect(find.text('Refund not confirmed'), findsOneWidget);
+    await tester.tap(find.text('Yes, mark as Refunded'));
+    await tester.pumpAndSettle();
+
+    // The refund is recorded as Refunded with the online method + the
+    // transaction id from the (non-success) response.
+    expect(controller.markedPayments, [
+      ('APT_REFUND_CONFIRMED', 'Refunded'),
+    ]);
+    expect(controller.refunds, [('APT_REFUND_CONFIRMED', 'online')]);
+    expect(
+      find.textContaining('Refund of ₹650 recorded'),
+      findsOneWidget,
+    );
 
     await _settleAnimations(tester);
     await tester.pump(const Duration(seconds: 5));

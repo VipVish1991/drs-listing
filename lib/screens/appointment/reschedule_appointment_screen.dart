@@ -6,6 +6,7 @@ import '../../controllers/appointment_controller.dart';
 import '../../controllers/doctor_controller.dart';
 import '../../models/appointment_model.dart';
 import '../../models/doctor_model.dart';
+import '../../models/doctor_slot_model.dart';
 import '../../models/unavailable_range.dart';
 import '../../services/supabase_service.dart';
 import '../../utils/extensions.dart';
@@ -67,6 +68,12 @@ class _RescheduleAppointmentScreenState
 
   /// The new time slot string the patient tapped (e.g. "09:00 AM").
   String _selectedTimeSlot = '';
+
+  /// The consultation type ('tele' | 'video' | 'clinic') of the selected
+  /// slot — tracked alongside [_selectedTimeSlot] because the same clock
+  /// time can exist in several schedule types, so the type must come from
+  /// the group the patient tapped, never from the time alone.
+  String _selectedType = '';
 
   /// Whether slots are still loading.
   bool _slotsLoading = true;
@@ -241,7 +248,9 @@ class _RescheduleAppointmentScreenState
       return;
     }
 
-    final consultationType = _controller.getSlotTypeLabel(_selectedTimeSlot);
+    final consultationType = _selectedType.isNotEmpty
+        ? _selectedType
+        : _controller.getSlotTypeLabel(_selectedTimeSlot);
     final success = await _controller.rescheduleAppointment(
       _appointment,
       date: selected.isoDate,
@@ -726,6 +735,7 @@ class _RescheduleAppointmentScreenState
                           setState(() {
                             _selectedDateIndex = index;
                             _selectedTimeSlot = '';
+                            _selectedType = '';
                             _controller.selectedDayOfWeek.value = opt.dayOfWeek;
                           });
                         }
@@ -756,7 +766,7 @@ class _RescheduleAppointmentScreenState
         const SizedBox(height: 12),
         Obx(() {
           final dayOfWeek = _controller.selectedDayOfWeek.value;
-          final slots = _controller.getTimeSlotsForDay(dayOfWeek);
+          final schedules = _daySchedules(dayOfWeek);
           final selectedIsoDate = _selectedDateIndex >= 0
               ? dateOptions[_selectedDateIndex].isoDate
               : '';
@@ -788,7 +798,7 @@ class _RescheduleAppointmentScreenState
             );
           }
 
-          if (slots.isEmpty) {
+          if (schedules.isEmpty) {
             return Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
@@ -817,19 +827,17 @@ class _RescheduleAppointmentScreenState
             );
           }
 
-          final Map<String, List<String>> grouped = {};
-          for (final slot in slots) {
-            final type = _controller.getSlotTypeLabel(slot);
-            grouped.putIfAbsent(type, () => []);
-            grouped[type]!.add(slot);
-          }
-
+          // One group PER schedule row — each type's own slots render
+          // under its own heading even when several types share the same
+          // clock times (the old deduped-first-match grouping collapsed
+          // overlapping types into a single group).
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: grouped.entries.map((entry) {
-              final typeEmoji = _typeEmoji(entry.key);
-              final typeLabel = _typeLabel(entry.key);
-              final typeColor = _typeColor(entry.key);
+            children: schedules.map((schedule) {
+              final type = schedule.scheduleType;
+              final typeEmoji = _typeEmoji(type);
+              final typeLabel = _typeLabel(type);
+              final typeColor = _typeColor(type);
               return Padding(
                 padding: const EdgeInsets.only(bottom: 18),
                 child: Column(
@@ -856,7 +864,7 @@ class _RescheduleAppointmentScreenState
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            '₹${_slotFee(entry.key)}',
+                            '₹${schedule.fee}',
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
@@ -870,8 +878,9 @@ class _RescheduleAppointmentScreenState
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: entry.value.map((timeSlot) {
-                        final isTimeSelected = _selectedTimeSlot == timeSlot;
+                      children: schedule.slots.map((timeSlot) {
+                        final isTimeSelected = _selectedTimeSlot == timeSlot &&
+                            _selectedType == type;
                         // The appointment's own slot is NOT treated as
                         // booked (the patient can keep it or move away).
                         final isBooked = _controller.isSlotBookedExcluding(
@@ -888,9 +897,10 @@ class _RescheduleAppointmentScreenState
                         return GestureDetector(
                           onTap: isDisabled
                               ? null
-                              : () => setState(
-                                  () => _selectedTimeSlot = timeSlot,
-                                ),
+                              : () => setState(() {
+                                    _selectedTimeSlot = timeSlot;
+                                    _selectedType = type;
+                                  }),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 200),
                             padding: const EdgeInsets.symmetric(
@@ -1328,20 +1338,25 @@ class _RescheduleAppointmentScreenState
     }
   }
 
-  int _slotFee(String type) {
-    for (final s in _controller.doctorSlots) {
-      if (s.scheduleType == type && s.isEnabled) return s.fee;
-    }
-    switch (type) {
-      case 'tele':
-        return 500;
-      case 'video':
-        return 800;
-      case 'clinic':
-        return 1000;
-      default:
-        return 0;
-    }
+  /// The doctor's enabled, non-empty schedule rows for [dayOfWeek] in the
+  /// canonical display order (Tele → Video → In-Clinic). Each row keeps
+  /// its OWN slot list — rows are never merged, so a clock time present in
+  /// several consultation types appears in every group.
+  List<DoctorSlot> _daySchedules(String dayOfWeek) {
+    const order = ['tele', 'video', 'clinic'];
+    return _controller.doctorSlots
+        .where(
+          (s) =>
+              s.dayOfWeek == dayOfWeek &&
+              s.isEnabled &&
+              s.slots.isNotEmpty,
+        )
+        .toList()
+      ..sort(
+        (a, b) => order
+            .indexOf(a.scheduleType)
+            .compareTo(order.indexOf(b.scheduleType)),
+      );
   }
 }
 

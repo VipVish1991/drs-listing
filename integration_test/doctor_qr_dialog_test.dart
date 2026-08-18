@@ -125,11 +125,10 @@ void main() {
     expect(visibleUrl, findsOneWidget,
         reason: 'dialog must show the booking URL under the QR');
     final urlText = tester.widget<Text>(visibleUrl).data!;
-    // booking.html is a REAL file on GitHub Pages (HTTP 200 for crawlers);
-    // the placeId rides in the ?doctor= query param, which the booking
-    // page parses (the pretty /book/<placeId> path was removed because
-    // Pages serves it through 404.html with an HTTP 404 status).
-    expect(urlText, contains('booking.html?doctor='));
+    // Flutter web app deployed to GitHub Pages — the hash route
+    // #/web-booking loads the full booking screen. The placeId rides
+    // in the ?doctor= query param.
+    expect(urlText, contains('#/web-booking?doctor='));
     expect(urlText, contains('token=${AppConstants.bookingSharedSecret}'));
     expect(urlText, contains('name='));
     debugPrint('QR dialog booking URL: $urlText');

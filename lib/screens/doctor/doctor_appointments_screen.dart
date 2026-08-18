@@ -371,18 +371,115 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
         );
       }
     } else {
-      // Nothing was sent — the doctor can safely try again. For a
-      // 'submitted' (unconfirmed) payment the money MAY have gone out, so
-      // the message never tells them to just re-send.
-      showErrorSnackbar(
-        result.isSubmitted
-            ? 'Refund not confirmed by the UPI app yet — the payment was '
-                  'NOT marked as refunded. Check with the patient whether '
-                  'the refund arrived BEFORE sending it again.'
-            : 'Refund failed or was cancelled — nothing was sent and the '
-                  'payment was NOT marked as refunded. You can try again.',
+      // The UPI app did NOT return a confirmed success. This is a known
+      // limitation of intent-based UPI: many apps (Paytm, PhonePe, GPay)
+      // return Status=FAILURE or no usable response even when the money
+      // ACTUALLY moved (the on-device smoke test saw Paytm return FAILURE
+      // instantly for a ₹1 test). Never record a refund on an unconfirmed
+      // response — but DO let the doctor verify in their UPI app and
+      // record the refund if it genuinely went through, so a real refund
+      // is not stranded as Paid forever.
+      final confirmed = await _askRefundConfirmation(a, p, vpa);
+      if (!mounted || confirmed == null) return;
+      if (!confirmed) {
+        // The doctor verified the refund did NOT go through — nothing was
+        // sent/recorded, the payment stays Paid. For a 'submitted'
+        // (unconfirmed) payment the money MAY have gone out, so the
+        // message never tells them to just re-send.
+        showErrorSnackbar(
+          result.isSubmitted
+              ? 'Refund not confirmed by the UPI app — the payment was '
+                    'NOT marked as refunded. Check with the patient whether '
+                    'the refund arrived BEFORE sending it again.'
+              : 'Refund failed or was cancelled — nothing was sent and the '
+                    'payment was NOT marked as refunded. You can try again.',
+        );
+        return;
+      }
+      // The doctor verified the refund went through in their UPI app —
+      // record it (same retry logic as the confirmed path).
+      final recorded = await _recordOnlineRefund(
+        p,
+        vpa: vpa,
+        transactionId: result.transactionId,
+        rawResponse: result.rawResponse,
       );
+      if (recorded) {
+        _unrecordedOnlineRefunds.remove(p.id);
+        showSuccessSnackbar(
+          'Refund of ${p.amountLabel} recorded — payment marked as Refunded',
+        );
+      } else {
+        // Payments shown on the cards always carry a server id.
+        _unrecordedOnlineRefunds[p.id!] = _PendingOnlineRefund(
+          vpa: vpa,
+          transactionId: result.transactionId,
+          rawResponse: result.rawResponse,
+        );
+        showErrorSnackbar(
+          'Refund of ${p.amountLabel} was sent to '
+          '${a.patientName ?? 'the patient'}, but the payment record could '
+          'not be updated. The refund is NOT recorded yet — do NOT send it '
+          'again. Tap Refund again to retry recording it.',
+        );
+      }
     }
+  }
+
+  /// After a non-success UPI response, asks the doctor to verify in their
+  /// own UPI app whether the refund actually went through. Intent-based
+  /// UPI often returns Status=FAILURE or no usable response even when the
+  /// money moved, so the doctor's check is the source of truth. Returns
+  /// `true` when the doctor confirms the refund went through, `false`
+  /// when it did not, `null` when dismissed.
+  Future<bool?> _askRefundConfirmation(
+    AppointmentModel a,
+    PaymentModel p,
+    String vpa,
+  ) {
+    return Get.dialog<bool>(
+      AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Text('Refund not confirmed'),
+        content: SingleChildScrollView(
+          child: Text(
+            'The UPI app did not return a success response for the refund '
+            'to $vpa. Open your UPI app and check whether '
+            '${p.amountLabel} was actually sent to '
+            '${a.patientName ?? 'the patient'}.\n\n'
+            'If it went through, tap "Yes, mark as Refunded" so the '
+            'payment is recorded as refunded.',
+            style: const TextStyle(
+              fontSize: 13.5,
+              height: 1.4,
+              color: AppColors.textBody,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(result: false),
+            child: Text(
+              'It did not go through',
+              style: TextStyle(color: AppColors.textCaption),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Get.back(result: true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.success,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text('Yes, mark as Refunded'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Records an online refund that the UPI app CONFIRMED, retrying the
@@ -863,6 +960,8 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
               onRefund: payment != null && refundable
                   ? () => _handleRefund(a, payment)
                   : null,
+              hasPendingRefund: payment != null &&
+                  _unrecordedOnlineRefunds.containsKey(payment.id),
               onTap: () => _showAppointmentDetails(a),
               onCancel: () => _handleCancel(a),
               onConfirm: isPending ? () => _handleConfirm(a) : null,
@@ -924,6 +1023,12 @@ class _ModernAppointmentCard extends StatelessWidget {
   final VoidCallback? onMarkPaid;
   final VoidCallback? onRefund;
 
+  /// When true the Refund button label changes to "Retry Recording"
+  /// and a yellow warning banner appears — tells the doctor the UPI
+  /// money was already sent but the payment record still needs to be
+  /// updated in Supabase.
+  final bool hasPendingRefund;
+
   const _ModernAppointmentCard({
     required this.appointment,
     required this.displayStatus,
@@ -940,6 +1045,7 @@ class _ModernAppointmentCard extends StatelessWidget {
     this.payment,
     this.onMarkPaid,
     this.onRefund,
+    this.hasPendingRefund = false,
   });
 
   @override
@@ -1086,6 +1192,42 @@ class _ModernAppointmentCard extends StatelessWidget {
               ),
             ],
           ),
+          // Yellow warning banner when a refund was already sent via
+          // UPI but the payment record couldn't be updated — tapping
+          // Refund again retries the RECORD only (no second UPI send).
+          if (hasPendingRefund) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withAlpha(15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.warning.withAlpha(60)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 14,
+                    color: AppColors.warning,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Refund already sent via UPI — tap Retry below to '
+                      'record it. Do NOT send again.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.warning,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (hasActions) ...[
             const SizedBox(height: 10),
             Wrap(
@@ -1102,13 +1244,27 @@ class _ModernAppointmentCard extends StatelessWidget {
                   ),
                 if (onRefund != null)
                   _ModernActionBtn(
-                    label: 'Refund',
-                    icon: Icons.currency_rupee_rounded,
-                    color: AppColors.info,
+                    label: hasPendingRefund
+                        ? 'Retry Recording'
+                        : 'Refund',
+                    icon: hasPendingRefund
+                        ? Icons.replay_rounded
+                        : Icons.currency_rupee_rounded,
+                    color: hasPendingRefund
+                        ? AppColors.warning
+                        : AppColors.info,
                     onTap: onRefund!,
                   ),
               ],
             ),
+          ],
+          // Refund details shown on the doctor card when the payment was
+          // refunded — the Refund button is already hidden (onRefund is
+          // null for 'Refunded'), so this row replaces the action buttons
+          // with the refund summary (method + date + amount).
+          if (p.paymentStatus == 'Refunded') ...[
+            const SizedBox(height: 10),
+            _RefundDetailRow(payment: p),
           ],
         ],
       ),
@@ -1271,6 +1427,72 @@ class _ModernActionBtn extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Refund summary shown inside the doctor card's payment row when the
+/// payment was refunded. Shows refund method, date so the doctor
+/// doesn't need to open the details sheet to confirm the refund
+/// was recorded.
+class _RefundDetailRow extends StatelessWidget {
+  final PaymentModel payment;
+
+  const _RefundDetailRow({required this.payment});
+
+  @override
+  Widget build(BuildContext context) {
+    final method = payment.refundMethodLabel ?? '—';
+    final refundedOn = payment.refundedAt;
+    final dateStr = refundedOn != null
+        ? '${refundedOn.day.toString().padLeft(2, '0')}-'
+              '${refundedOn.month.toString().padLeft(2, '0')}-${refundedOn.year}'
+        : null;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.info.withAlpha(10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.info.withAlpha(30)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.currency_rupee_rounded,
+            size: 14,
+            color: AppColors.info,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'Refunded $method',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.info,
+            ),
+          ),
+          if (dateStr != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              width: 3,
+              height: 3,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.info,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              dateStr,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: AppColors.info.withAlpha(200),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

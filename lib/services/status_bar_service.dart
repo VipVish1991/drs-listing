@@ -5,10 +5,9 @@ import '../config/theme.dart';
 /// Applies the system status bar (and navigation bar) colors and icon
 /// brightness using the `flutter_statusbarcolor_ns` plugin.
 ///
-/// The status bar is WHITE across the whole app (with black icons/text)
-/// regardless of the screen behind it — matching the app-wide
-/// `SystemUiOverlayStyle` in the theme. Only the system navigation bar
-/// still follows the screen's brightness ([isDark]).
+/// The status bar is TRANSPARENT by default so the teal gradient
+/// headers show through; individual screens with white/light backgrounds
+/// override locally via `AnnotatedRegion<SystemUiOverlayStyle>`.
 ///
 /// The plugin calls are best-effort: on platforms where they are
 /// unavailable (e.g. widget tests) they fail silently and the theme's
@@ -23,19 +22,19 @@ class StatusBarService {
     );
   }
 
-  /// Applies the white status bar with black icons/text on every screen
-  /// (the whole-app design), and keeps the system navigation bar
-  /// consistent with the theme. [background] is accepted for call-site
-  /// compatibility only — the status bar is always white.
+  /// Applies a transparent status bar with white foreground icons so
+  /// the gradient headers show through, and keeps the system navigation
+  /// bar consistent with the theme. [background] is accepted for
+  /// call-site compatibility only.
   static Future<void> apply({
     required Color background,
     required bool isDark,
   }) async {
     try {
-      // White status bar across the whole app with black icons — the
-      // screen's own background color never shows through.
-      await FlutterStatusbarcolor.setStatusBarColor(Colors.white);
-      await FlutterStatusbarcolor.setStatusBarWhiteForeground(false);
+      // Transparent status bar — the gradient header shows through.
+      // White foreground icons since the gradient is dark teal.
+      await FlutterStatusbarcolor.setStatusBarColor(Colors.transparent);
+      await FlutterStatusbarcolor.setStatusBarWhiteForeground(true);
 
       final navBarColor = isDark ? const Color(0xFF111318) : AppColors.bgMain;
       await FlutterStatusbarcolor.setNavigationBarColor(navBarColor);

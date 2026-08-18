@@ -116,6 +116,57 @@ class _ClinicSlotAppointmentController
   }
 }
 
+/// AppointmentController double: ALL THREE consultation types (tele / video
+/// / clinic) on tomorrow, each with the EXACT SAME slot times — the setup
+/// that used to collapse into a single group. Regression guard for the
+/// booking screen showing only one consultation type when the doctor runs
+/// several types at the same clock times.
+class _AllTypesAppointmentController
+    extends _VideoSlotAppointmentController {
+  @override
+  Future<void> loadDoctorSlots(String doctorPlaceId) async {
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final dayOfWeek =
+        _VideoSlotAppointmentController._fullDayNames[tomorrow.weekday - 1];
+    const sharedSlots = ['9:00 AM', '9:30 AM', '10:00 AM'];
+    doctorSlots.value = [
+      DoctorSlot(
+        doctorPlaceId: doctorPlaceId,
+        dayOfWeek: dayOfWeek,
+        scheduleType: 'tele',
+        startTime: '09:00',
+        endTime: '12:00',
+        durationMinutes: 30,
+        fee: 500,
+        slots: sharedSlots,
+        isEnabled: true,
+      ),
+      DoctorSlot(
+        doctorPlaceId: doctorPlaceId,
+        dayOfWeek: dayOfWeek,
+        scheduleType: 'video',
+        startTime: '09:00',
+        endTime: '12:00',
+        durationMinutes: 30,
+        fee: 800,
+        slots: sharedSlots,
+        isEnabled: true,
+      ),
+      DoctorSlot(
+        doctorPlaceId: doctorPlaceId,
+        dayOfWeek: dayOfWeek,
+        scheduleType: 'clinic',
+        startTime: '09:00',
+        endTime: '12:00',
+        durationMinutes: 30,
+        fee: 1000,
+        slots: sharedSlots,
+        isEnabled: true,
+      ),
+    ];
+  }
+}
+
 /// Stub targets for the booking success navigation (not reached in most
 /// tests, but required so the route table is complete).
 class _HomeStub extends StatelessWidget {
@@ -347,13 +398,88 @@ void main() {
 
     // The same Consultation Payment sheet appears, labeled for the
     // In-Clinic visit, with both payment options (the doctor set a UPI
-    // VPA in the DB, so Online Pay is offered).
-    expect(find.text('Consultation Payment'), findsOneWidget);
+    // VPA in the DB, so Online Pay is offered).    expect(find.text('Consultation Payment'), findsOneWidget);
     expect(find.text('In-Clinic  •  ₹500'), findsOneWidget);
     expect(find.text('Pay to: clinic@okhdfcbank'), findsOneWidget);
     expect(find.text('Online Pay (UPI)'), findsOneWidget);
     expect(find.text('Offline Pay'), findsOneWidget);
   });
+
+  testWidgets('all consultation types render as separate groups when they '
+      'share the same slot times', (tester) async {
+    // Regression: a doctor running Tele / Video / In-Clinic at the SAME
+    // clock times (the real data in the DB) used to collapse into a single
+    // group — the deduped time list mapped every slot back to the first
+    // matching type, so only one consultation type ever appeared. Every
+    // enabled type must render its own heading + its own slots.
+    Get.reset();
+    Get.put<AuthController>(_TestAuthController(), permanent: true);
+    Get.put<AppointmentController>(
+      _AllTypesAppointmentController(),
+      permanent: true,
+    );
+
+    await pumpBookingFlow(tester);
+
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final dateChip = find.descendant(
+      of: find.byType(GestureDetector),
+      matching: find.text('${tomorrow.day}'),
+    );
+    await tester.ensureVisible(dateChip.first);
+    await tester.pump();
+    await tester.tap(dateChip.first);
+    await tester.pump();
+
+    // All three group headings render with their own fee chips.
+    expect(find.text('📞 Tele Consultation'), findsOneWidget);
+    expect(find.text('🎥 Video Consultation'), findsOneWidget);
+    expect(find.text('🏥 In-Clinic'), findsOneWidget);
+    expect(find.text('₹500'), findsOneWidget);
+    expect(find.text('₹800'), findsOneWidget);
+    expect(find.text('₹1000'), findsOneWidget);
+
+    // The shared clock time exists once PER group (3 identical chips), not
+    // deduped into a single chip.
+    expect(find.text('9:00 AM'), findsNWidgets(3));
+
+    // Tapping the slot inside the TELE group books a TELE consultation at
+    // the tele fee — the tapped group's type, not the first match.
+    final teleSlot = find.descendant(
+      of: find
+          .ancestor(
+            of: find.text('📞 Tele Consultation'),
+            matching: find.byType(Column),
+          )
+          .first,
+      matching: find.text('9:00 AM'),
+    );
+    await tester.ensureVisible(teleSlot);
+    await tester.pump();
+    await tester.tap(teleSlot);
+    await tester.pump();
+
+    final bookButton = find.widgetWithText(InkWell, 'Book Appointment');
+    await tester.ensureVisible(bookButton);
+    await tester.pump();
+    await tester.tap(bookButton);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Tele Consultation  •  ₹500'), findsOneWidget);
+    await tester.tap(find.text('Offline Pay'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final controller = Get.find<AppointmentController>()
+        as _AllTypesAppointmentController;
+    expect(controller.bookAppointmentCalls, 1);
+    expect(controller.lastPayment!.consultationType, 'tele');
+    expect(controller.lastPayment!.amount, 500);
+  });
+
+
+
 
   testWidgets('a confirmed UPI payment books with an online Paid record', (
     tester,

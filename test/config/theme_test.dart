@@ -6,24 +6,24 @@ import 'package:DrsListing/config/theme.dart';
 
 void main() {
   group('AppTheme system overlay style', () {
-    test('appBarTheme configures a white status bar with black icons', () {
+    test('appBarTheme configures a transparent status bar with light icons', () {
       final style = AppTheme.lightTheme.appBarTheme.systemOverlayStyle;
 
       expect(style, isNotNull);
       expect(
         style!.statusBarColor,
-        Colors.white,
-        reason: 'the status bar is solid white across the whole app',
+        Colors.transparent,
+        reason: 'transparent so gradient headers show through',
       );
       expect(
         style.statusBarIconBrightness,
-        Brightness.dark,
-        reason: 'black icons stay visible on the white status bar (Android)',
+        Brightness.light,
+        reason: 'white icons on the dark teal gradient header (Android)',
       );
       expect(
         style.statusBarBrightness,
-        Brightness.light,
-        reason: 'iOS keeps dark text over the white status bar',
+        Brightness.dark,
+        reason: 'iOS keeps light text over the gradient header',
       );
       expect(style.systemNavigationBarColor, AppColors.bgMain);
       expect(style.systemNavigationBarIconBrightness, Brightness.dark);
@@ -32,7 +32,7 @@ void main() {
 
   group('system overlay style applied at app level', () {
     testWidgets(
-      'pumping a screen with the app theme sends the white status bar to the platform',
+      'pumping a screen with the app theme sends the transparent status bar to the platform',
       (tester) async {
         // SystemChrome.setSystemUIOverlayStyle is invoked on
         // SystemChannels.platform with a map of platform-encoded values
@@ -67,11 +67,11 @@ void main() {
           ),
         );
 
-        // Pick the style the AppBar sent (identifiable by its white
+        // Pick the style the AppBar sent (identifiable by its transparent
         // status bar) rather than assuming microtask ordering of the
         // MaterialApp-level call.
         final effective = sentStyles.firstWhere(
-          (args) => args['statusBarColor'] == Colors.white.value,
+          (args) => args['statusBarColor'] == Colors.transparent.value,
           orElse: () => <dynamic, dynamic>{},
         );
         String? brightness(Map<dynamic, dynamic> args, String key) =>
@@ -84,16 +84,16 @@ void main() {
           reason: 'the AppBar must call SystemChrome.setSystemUIOverlayStyle',
         );
 
-        // Solid white status bar, matching StatusBarService (plugin).
-        expect(color(effective, 'statusBarColor'), Colors.white.value);
-        // Black status-bar icons on the white bar.
+        // Transparent status bar so gradient headers show through.
+        expect(color(effective, 'statusBarColor'), Colors.transparent.value);
+        // White status-bar icons on the dark teal gradient.
         expect(
           brightness(effective, 'statusBarIconBrightness'),
-          'Brightness.dark',
+          'Brightness.light',
         );
         expect(
           brightness(effective, 'statusBarBrightness'),
-          'Brightness.light',
+          'Brightness.dark',
         );
         // Light system navigation bar with dark icons.
         expect(
