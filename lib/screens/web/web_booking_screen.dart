@@ -28,6 +28,31 @@ class _WebBookingScreenState extends State<WebBookingScreen>
   late final WebBookingController _c;
   late final TabController _tabController;
 
+  /// Extracts the doctor placeId from route arguments, URL query
+  /// parameters, OR the hash fragment (Flutter web hash routing puts
+  /// query params inside the hash: #/web-booking?doctor=X).
+  static String? _doctorFromUrl() {
+    // 1. In-app navigation via Get.toNamed
+    final args = Get.arguments;
+    if (args is Map && args['doctor'] != null) {
+      return args['doctor'].toString();
+    }
+    // 2. Standard URL query parameters (e.g. ?doctor=X)
+    final fromQuery = Uri.base.queryParameters['doctor'];
+    if (fromQuery != null && fromQuery.isNotEmpty) return fromQuery;
+    // 3. Hash fragment — Flutter web default routing puts everything
+    //    after # into the fragment: #/web-booking?doctor=X&token=Y
+    final fragment = Uri.base.fragment;
+    if (fragment.isNotEmpty) {
+      final hashUri = Uri.parse(
+        fragment.startsWith('/') ? fragment : '/$fragment',
+      );
+      final fromHash = hashUri.queryParameters['doctor'];
+      if (fromHash != null && fromHash.isNotEmpty) return fromHash;
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -35,12 +60,7 @@ class _WebBookingScreenState extends State<WebBookingScreen>
     _tabController = TabController(length: 2, vsync: this);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      String? placeId;
-      final args = Get.arguments;
-      if (args is Map && args['doctor'] != null) {
-        placeId = args['doctor'].toString();
-      }
-      placeId ??= Uri.base.queryParameters['doctor'];
+      final placeId = _doctorFromUrl();
       if (placeId != null && placeId.isNotEmpty) {
         _c.loadDoctor(placeId);
         _c.loadHistory();
@@ -1209,12 +1229,7 @@ class _WebBookingScreenState extends State<WebBookingScreen>
             const SizedBox(height: 20),
             ElevatedButton.icon(
               onPressed: () {
-                final args = Get.arguments;
-                String? placeId;
-                if (args is Map && args['doctor'] != null) {
-                  placeId = args['doctor'].toString();
-                }
-                placeId ??= Uri.base.queryParameters['doctor'];
+                final placeId = _doctorFromUrl();
                 if (placeId != null) _c.loadDoctor(placeId);
               },
               icon: const Icon(Icons.refresh, size: 18),
