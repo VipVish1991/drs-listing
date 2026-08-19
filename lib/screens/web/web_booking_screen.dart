@@ -64,6 +64,10 @@ class _WebBookingScreenState extends State<WebBookingScreen>
       if (placeId != null && placeId.isNotEmpty) {
         _c.loadDoctor(placeId);
         _c.loadHistory();
+      } else {
+        // No doctor param — stop loading so the 'No doctor selected'
+        // message is shown instead of a perpetual spinner.
+        _c.isLoadingDoctor.value = false;
       }
     });
   }
@@ -1208,6 +1212,9 @@ class _WebBookingScreenState extends State<WebBookingScreen>
   // ════════════════════════════════════════════════════════════════════
 
   Widget _buildErrorView(String message) {
+    // When no doctor param exists in the URL, hide the Retry button
+    // since retrying won't help — the user needs a valid QR code.
+    final hasDoctorInUrl = _doctorFromUrl() != null;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -1218,29 +1225,43 @@ class _WebBookingScreenState extends State<WebBookingScreen>
               width: 80,
               height: 80,
               decoration: BoxDecoration(
-                  shape: BoxShape.circle, color: AppColors.error.withAlpha(15)),
-              child: const Icon(Icons.error_outline_rounded,
-                  size: 40, color: AppColors.error),
+                  shape: BoxShape.circle, color: AppColors.primary.withAlpha(15)),
+              child: const Icon(Icons.qr_code_scanner_rounded,
+                  size: 40, color: AppColors.primary),
             ),
-            const SizedBox(height: 16),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 15, color: AppColors.textBody)),
             const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: () {
-                final placeId = _doctorFromUrl();
-                if (placeId != null) _c.loadDoctor(placeId);
-              },
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Retry'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+            Text(
+              'No Doctor Found',
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textHeading,
               ),
             ),
+            const SizedBox(height: 8),
+            Text(message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 14,
+                    color: AppColors.textCaption,
+                    height: 1.5)),
+            if (hasDoctorInUrl) ...[
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () {
+                  final placeId = _doctorFromUrl();
+                  if (placeId != null) _c.loadDoctor(placeId);
+                },
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
           ],
         ),
       ),
