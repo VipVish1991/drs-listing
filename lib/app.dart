@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'config/theme.dart';
@@ -37,6 +38,7 @@ import 'services/connectivity_service.dart';
 import 'services/local_storage_service.dart';
 import 'services/supabase_service.dart';
 import 'routes/app_route_observer.dart';
+import 'utils/web_booking_url.dart';
 
 class App extends StatefulWidget {
   const App({super.key});
@@ -80,7 +82,7 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       // banner from anywhere without a BuildContext.
       scaffoldMessengerKey: appScaffoldMessengerKey,
       navigatorObservers: [appRouteObserver],
-      initialRoute: AppRoutes.splash,
+      initialRoute: _initialRoute(),
       getPages: [
         GetPage(
           name: AppRoutes.splash,
@@ -249,6 +251,22 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       ],
     );
   }
+}
+
+/// When the Flutter web app is opened via a booking URL (e.g.
+/// `bookingHost/#/web-booking?doctor=X`), the initial route must be
+/// `/web-booking` so the WebBookingScreen renders directly. Without this,
+/// `initialRoute: '/'` loads the splash screen, whose `_navigate()` call
+/// destroys the web-booking route and shows a blank page.
+String _initialRoute() {
+  if (!kIsWeb) return AppRoutes.splash;
+  try {
+    final fragment = Uri.base.fragment;
+    if (isWebBookingFragment(fragment)) {
+      return AppRoutes.webBooking;
+    }
+  } catch (_) {}
+  return AppRoutes.splash;
 }
 
 /// Loads the logged-in doctor's clinic payment rows for the doctor payment

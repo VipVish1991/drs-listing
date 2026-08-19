@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../controllers/auth_controller.dart';
 import '../models/appointment_model.dart';
@@ -14,6 +16,15 @@ import '../services/supabase_service.dart';
 /// payment flow, booking submission, and full history with details.
 class WebBookingController extends GetxController {
   final SupabaseService _supabase = SupabaseService();
+
+  // ── Web user registration (browser-only) ───────────────────────
+  final RxBool isRegistered = false.obs;
+  final RxString webUserName = ''.obs;
+  final RxString webUserPhone = ''.obs;
+  final RxString webUserSymptoms = ''.obs;
+  final RxString regError = ''.obs;
+  final RxBool isRegistering = false.obs;
+  String _webUserId = '';
 
   // ── Doctor data ──────────────────────────────────────────────────
   final Rxn<DoctorModel> doctor = Rxn<DoctorModel>();
@@ -126,6 +137,87 @@ class WebBookingController extends GetxController {
       patientName.value.trim().isNotEmpty &&
       patientPhone.value.trim().isNotEmpty &&
       !isBooking.value;
+
+  // ── Web user registration / login ───────────────────────────────
+
+  /// Restores a previous web session from SharedPreferences.
+  Future<void> restoreWebSession() async {
+    if (!kIsWeb) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final name = prefs.getString('web_user_name') ?? '';
+      final phone = prefs.getString('web_user_phone') ?? '';
+      final uid = prefs.getString('web_user_id') ?? '';
+      if (name.isNotEmpty && phone.isNotEmpty && uid.isNotEmpty) {
+        webUserName.value = name;
+        webUserPhone.value = phone;
+        _webUserId = uid;
+        isRegistered.value = true;
+        patientName.value = name;
+        patientPhone.value = phone;
+      }
+    } catch (_) {}
+  }
+
+  /// Registers a new web user (name + mobile) in Supabase or
+  /// finds an existing one by mobile, then persists the session.
+  Future<void> registerWebUser() async {
+    regError.value = '';
+    final name = webUserName.value.trim();
+    final phone = webUserPhone.value.trim();
+    if (name.isEmpty) { regError.value = 'Please enter your name.'; return; }
+    if (phone.isEmpty || phone.length < 10) { regError.value = 'Please enter a valid 10-digit mobile number.'; return; }
+
+    isRegistering.value = true;
+    try {
+      // Try to find existing user by mobile
+      final existing = await _supabase.findUserByMobile(phone);
+      if (existing != null && existing['id'] != null) {
+        _webUserId = existing['id'].toString();
+      } else {
+        // Create new user
+        final newUser = await _supabase.createWebUser(name: name, mobile: phone);
+        _webUserId = newUser['id'].toString();
+      }
+
+      // Persist session
+      if (kIsWeb) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('web_user_name', name);
+        await prefs.setString('web_user_phone', phone);
+        await prefs.setString('web_user_id', _webUserId);
+      }
+
+      webUserName.value = name;
+      webUserPhone.value = phone;
+      patientName.value = name;
+      patientPhone.value = phone;
+      isRegistered.value = true;
+    } catch (e) {
+      regError.value = 'Registration failed. Please try again.';
+    } finally {
+      isRegistering.value = false;
+    }
+  }
+
+  /// Logs out the web user (clears session).
+  void logoutWebUser() {
+    isRegistered.value = false;
+    webUserName.value = '';
+    webUserPhone.value = '';
+    webUserSymptoms.value = '';
+    _webUserId = '';
+    patientName.value = '';
+    patientPhone.value = '';
+    symptoms.value = '';
+    if (kIsWeb) {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.remove('web_user_name');
+        prefs.remove('web_user_phone');
+        prefs.remove('web_user_id');
+      });
+    }
+  }
 
   // ── Init ─────────────────────────────────────────────────────────
 

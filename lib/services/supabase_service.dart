@@ -469,6 +469,41 @@ class SupabaseService {
     );
   }
 
+  // ── Web user registration (browser-only booking) ──────────────────
+
+  /// Find an existing user row by mobile number. Returns the row
+  /// or null if no match.
+  Future<Map<String, dynamic>?> findUserByMobile(String mobile) async {
+    try {
+      final rows = await client
+          .from('users')
+          .select('id, name, mobile')
+          .eq('mobile', mobile)
+          .limit(1);
+      return rows.isNotEmpty ? rows.first : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Create a minimal web user row (name + mobile) for the browser
+  /// booking flow. Returns the created row with `id`.
+  Future<Map<String, dynamic>> createWebUser({
+    required String name,
+    required String mobile,
+  }) async {
+    final response = await client
+        .from('users')
+        .insert({
+          'name': name,
+          'mobile': mobile,
+          'role': 'patient',
+        })
+        .select('id, name, mobile')
+        .single();
+    return response;
+  }
+
   /// Save (or clear, when [link] is null/empty) the shared Google Meet URL
   /// for a video/tele consultation. Runs with the `x-user-id` header — the
   /// appointments UPDATE policy lets both the owning patient and the

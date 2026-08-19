@@ -59,14 +59,14 @@ class _WebBookingScreenState extends State<WebBookingScreen>
     _c = Get.put(WebBookingController(), permanent: false);
     _tabController = TabController(length: 2, vsync: this);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Restore any previous web session (name+mobile).
+      await _c.restoreWebSession();
       final placeId = _doctorFromUrl();
       if (placeId != null && placeId.isNotEmpty) {
         _c.loadDoctor(placeId);
-        _c.loadHistory();
+        if (_c.isRegistered.value) _c.loadHistory();
       } else {
-        // No doctor param — stop loading so the 'No doctor selected'
-        // message is shown instead of a perpetual spinner.
         _c.isLoadingDoctor.value = false;
       }
     });
@@ -98,6 +98,7 @@ class _WebBookingScreenState extends State<WebBookingScreen>
                 ],
               ),
             ),
+            _buildBottomBar(),
           ],
         ),
       ),
@@ -196,6 +197,344 @@ class _WebBookingScreenState extends State<WebBookingScreen>
           ),
         ],
       ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // Bottom sticky bar — login/logout + download links
+  // ════════════════════════════════════════════════════════════════════
+
+  Widget _buildBottomBar() {
+    final width = MediaQuery.of(context).size.width;
+    final isNarrow = width <= 500;
+    return Obx(() {
+      return Container(
+        padding: EdgeInsets.symmetric(
+            horizontal: isNarrow ? 12 : 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.bgCard,
+          border: Border(
+            top: BorderSide(color: AppColors.textDisabled.withAlpha(40)),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(6),
+              blurRadius: 8,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: isNarrow
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Row 1: user info or login
+                    if (_c.isRegistered.value)
+                      Row(children: [
+                        Icon(Icons.person_rounded, size: 16, color: AppColors.primary),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(_c.webUserName.value,
+                              style: const TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.w600,
+                                  color: AppColors.textHeading),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        TextButton.icon(
+                          onPressed: () => _c.logoutWebUser(),
+                          icon: const Icon(Icons.logout_rounded, size: 16),
+                          label: const Text('Logout',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.error,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ])
+                    else
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () => _showRegistrationSheet(),
+                          icon: const Icon(Icons.login_rounded, size: 16),
+                          label: const Text('Login / Register',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.primary,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 6),
+                    // Row 2: download buttons
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _downloadChip(
+                          icon: Icons.android_rounded,
+                          label: 'Google Play',
+                          url: 'https://play.google.com/store/apps/details?id=com.drslisting.app',
+                        ),
+                        const SizedBox(width: 8),
+                        _downloadChip(
+                          icon: Icons.phone_iphone_rounded,
+                          label: 'App Store',
+                          url: 'https://apps.apple.com/app/drslisting/id6740000000',
+                        ),
+                      ],
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    if (_c.isRegistered.value) ...[
+                      Icon(Icons.person_rounded, size: 16, color: AppColors.primary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(_c.webUserName.value,
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w600,
+                                color: AppColors.textHeading),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _c.logoutWebUser(),
+                        icon: const Icon(Icons.logout_rounded, size: 16),
+                        label: const Text('Logout',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.error,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ] else ...[
+                      const Expanded(child: SizedBox()),
+                      TextButton.icon(
+                        onPressed: () => _showRegistrationSheet(),
+                        icon: const Icon(Icons.login_rounded, size: 16),
+                        label: const Text('Login / Register',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(width: 8),
+                    Container(width: 1, height: 20, color: AppColors.textDisabled.withAlpha(50)),
+                    const SizedBox(width: 8),
+                    _downloadChip(
+                      icon: Icons.android_rounded,
+                      label: 'Google Play',
+                      url: 'https://play.google.com/store/apps/details?id=com.drslisting.app',
+                    ),
+                    const SizedBox(width: 6),
+                    _downloadChip(
+                      icon: Icons.phone_iphone_rounded,
+                      label: 'App Store',
+                      url: 'https://apps.apple.com/app/drslisting/id6740000000',
+                    ),
+                  ],
+                ),
+        ),
+      );
+    });
+  }
+
+  Widget _downloadChip({
+    required IconData icon,
+    required String label,
+    required String url,
+  }) {
+    return InkWell(
+      onTap: () async {
+        final u = Uri.parse(url);
+        if (await canLaunchUrl(u)) {
+          await launchUrl(u, mode: LaunchMode.externalApplication);
+        }
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withAlpha(10),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.primary.withAlpha(30)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: AppColors.primary),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // Registration sheet
+  // ════════════════════════════════════════════════════════════════════
+
+  void _showRegistrationSheet() {
+    final nameCtrl = TextEditingController(text: _c.webUserName.value);
+    final phoneCtrl = TextEditingController(text: _c.webUserPhone.value);
+
+    Get.bottomSheet(
+      Container(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withAlpha(15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.person_add_rounded,
+                      color: AppColors.primary, size: 22),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text('Register to Book',
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textHeading)),
+                ),
+                IconButton(
+                  onPressed: () => Get.back(),
+                  icon: const Icon(Icons.close_rounded, color: AppColors.textCaption),
+                ),
+              ]),
+              const SizedBox(height: 4),
+              Text('Enter your details to book an appointment',
+                  style: TextStyle(fontSize: 13, color: AppColors.textBody)),
+              const SizedBox(height: 20),
+              TextField(
+                controller: nameCtrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  labelText: 'Full Name',
+                  prefixIcon: const Icon(Icons.person_outline_rounded, size: 20),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+                onChanged: (v) => _c.webUserName.value = v,
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: phoneCtrl,
+                keyboardType: TextInputType.phone,
+                maxLength: 10,
+                decoration: InputDecoration(
+                  labelText: 'Mobile Number',
+                  prefixIcon: const Icon(Icons.phone_outlined, size: 20),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  counterText: '',
+                ),
+                onChanged: (v) => _c.webUserPhone.value = v,
+              ),
+              const SizedBox(height: 8),
+              Obx(() {
+                if (_c.regError.value.isNotEmpty) {
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(_c.regError.value,
+                            style: const TextStyle(fontSize: 12, color: AppColors.error)),
+                      ),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: _c.isRegistering.value
+                              ? null
+                              : () async {
+                                  await _c.registerWebUser();
+                                  if (_c.isRegistered.value) {
+                                    Get.back();
+                                    final placeId = _doctorFromUrl();
+                                    if (placeId != null) _c.loadHistory();
+                                  }
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: _c.isRegistering.value
+                              ? const SizedBox(
+                                  width: 22, height: 22,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2.5, color: Colors.white))
+                              : const Text('Continue',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                    ],
+                  );
+                }
+                return SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: _c.isRegistering.value
+                        ? null
+                        : () async {
+                            await _c.registerWebUser();
+                            if (_c.isRegistered.value) {
+                              Get.back();
+                              // Reload history after registration
+                              final placeId = _doctorFromUrl();
+                              if (placeId != null) _c.loadHistory();
+                            }
+                          },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: _c.isRegistering.value
+                        ? const SizedBox(
+                            width: 22, height: 22,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.5, color: Colors.white))
+                        : const Text('Continue',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+      isScrollControlled: true,
     );
   }
 
