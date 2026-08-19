@@ -140,7 +140,7 @@ void main() {
       final url = AppConstants.bookingPageUrl(placeId);
 
       expect(url, startsWith('https://'));
-      expect(url, contains('#/web-booking?doctor=${Uri.encodeComponent(placeId)}'));
+      expect(url, contains('booking.html?doctor=${Uri.encodeComponent(placeId)}'));
       expect(url, contains('token=${AppConstants.bookingSharedSecret}'));
     });
 

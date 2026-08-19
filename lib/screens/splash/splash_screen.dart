@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -10,7 +9,6 @@ import '../../controllers/auth_controller.dart';
 import '../../routes/app_routes.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/status_bar_service.dart';
-import '../../utils/web_booking_url.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -42,30 +40,9 @@ class _SplashScreenState extends State<SplashScreen>
     super.dispose();
   }
 
-  /// On Flutter web, when the URL hash contains a booking route
-  /// (e.g. #/web-booking?doctor=X), the splash screen must NOT redirect
-  /// away — the WebBookingScreen handles itself. Redirecting here would
-  /// destroy the web-booking route and show a blank page.
-  static bool _isWebBookingUrl() {
-    if (!kIsWeb) return false;
-    try {
-      return isWebBookingFragment(Uri.base.fragment);
-    } catch (_) {
-      return false;
-    }
-  }
-
   Future<void> _navigate() async {
     await Future.delayed(const Duration(milliseconds: 400));
     if (!mounted) return;
-
-    // ── Web booking shortcut ──────────────────────────────────────
-    // When the app is opened via a browser booking URL (e.g.
-    // bookingHost/#/web-booking?doctor=X), skip all splash logic and
-    // let the WebBookingScreen handle the route directly. Without this
-    // guard the splash would call Get.offAllNamed(login) which destroys
-    // the web-booking route and shows a blank page.
-    if (_isWebBookingUrl()) return;
 
     // First-launch onboarding takes priority: skip the location prompt
     // until the user has actually entered the app (the home flow prompts

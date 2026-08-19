@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'config/theme.dart';
@@ -25,7 +24,6 @@ import 'screens/profile/notification_center_screen.dart';
 import 'screens/profile/about_screen.dart';
 import 'screens/profile/help_screen.dart';
 import 'screens/profile/privacy_policy_screen.dart';
-import 'screens/web/web_booking_screen.dart';
 import 'screens/doctor/nearby_doctors_screen.dart';
 import 'screens/doctor/doctor_availability_screen.dart';
 import 'screens/doctor/doctor_main_shell.dart';
@@ -38,7 +36,6 @@ import 'services/connectivity_service.dart';
 import 'services/local_storage_service.dart';
 import 'services/supabase_service.dart';
 import 'routes/app_route_observer.dart';
-import 'utils/web_booking_url.dart';
 
 class App extends StatefulWidget {
   const App({super.key});
@@ -82,7 +79,7 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       // banner from anywhere without a BuildContext.
       scaffoldMessengerKey: appScaffoldMessengerKey,
       navigatorObservers: [appRouteObserver],
-      initialRoute: _initialRoute(),
+      initialRoute: AppRoutes.splash,
       getPages: [
         GetPage(
           name: AppRoutes.splash,
@@ -244,29 +241,9 @@ class _AppState extends State<App> with WidgetsBindingObserver {
           name: AppRoutes.privacyPolicy,
           page: () => const PrivacyPolicyScreen(),
         ),
-        GetPage(
-          name: AppRoutes.webBooking,
-          page: () => const WebBookingScreen(),
-        ),
       ],
     );
   }
-}
-
-/// When the Flutter web app is opened via a booking URL (e.g.
-/// `bookingHost/#/web-booking?doctor=X`), the initial route must be
-/// `/web-booking` so the WebBookingScreen renders directly. Without this,
-/// `initialRoute: '/'` loads the splash screen, whose `_navigate()` call
-/// destroys the web-booking route and shows a blank page.
-String _initialRoute() {
-  if (!kIsWeb) return AppRoutes.splash;
-  try {
-    final fragment = Uri.base.fragment;
-    if (isWebBookingFragment(fragment)) {
-      return AppRoutes.webBooking;
-    }
-  } catch (_) {}
-  return AppRoutes.splash;
 }
 
 /// Loads the logged-in doctor's clinic payment rows for the doctor payment

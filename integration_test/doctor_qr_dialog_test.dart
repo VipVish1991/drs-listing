@@ -125,10 +125,9 @@ void main() {
     expect(visibleUrl, findsOneWidget,
         reason: 'dialog must show the booking URL under the QR');
     final urlText = tester.widget<Text>(visibleUrl).data!;
-    // Flutter web app deployed to GitHub Pages — the hash route
-    // #/web-booking loads the full booking screen. The placeId rides
-    // in the ?doctor= query param.
-    expect(urlText, contains('#/web-booking?doctor='));
+    // Static booking page (booking.html) on GitHub Pages.
+    // The placeId rides in the ?doctor= query param.
+    expect(urlText, contains('booking.html?doctor='));
     expect(urlText, contains('token=${AppConstants.bookingSharedSecret}'));
     expect(urlText, contains('name='));
     debugPrint('QR dialog booking URL: $urlText');

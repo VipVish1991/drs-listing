@@ -25,40 +25,6 @@ class AppConstants {
   static const String placesProxyUrl =
       'https://qxukzqdsmlurollltrjp.supabase.co/functions/v1/places-proxy';
 
-  // Browser booking page — encoded into the QR code shown from the doctor
-  // profile "Book" button. Patients scan it to open the booking form in
-  // their browser and book an appointment.
-  //
-  // The form is a STATIC page (booking.html) served from free GitHub Pages;
-  // its source lives in the `drsListing-web` GitHub repo
-  // (github.com/VipVish1991/drsListing-web). It cannot be served from the
-  // Supabase Edge Function directly: Supabase rewrites text/html GET
-  // responses to text/plain on the shared *.supabase.co domain, so
-  // browsers showed the raw HTML source instead of rendering the page.
-  // The static page reads the placeId + shared token from the URL and
-  // POSTs to the booking-page Edge Function as a JSON API.
-  //
-  // The booking shared secret gates the API: it is embedded in the URL and
-  // replayed as the `x-booking-token` header when the form submits. It
-  // must match the BOOKING_SHARED_SECRET env var set on the deployed
-  // Edge Function, e.g.: supabase secrets set BOOKING_SHARED_SECRET=<value>
-  //
-  // Live static host serving the drsListing-web site. Every push to main
-  // deploys via .github/workflows/pages.yml (Settings → Pages → Source:
-  // GitHub Actions must be enabled once).
-  //
-  // Booking URLs point at the REAL static file (booking.html) with the
-  // placeId as a ?doctor= query param — GitHub Pages has no server-side
-  // rewrites, so the pretty /book/<placeId> path has no backing file and
-  // would be served through 404.html with an HTTP 404 status (crawlers
-  // treat that as missing). booking.html?doctor=<placeId> is a real file
-  // → HTTP 200, and booking.html reads the doctor id from the query
-  // string. The old /book/<placeId> QR links still render (404.html
-  // fallback parses the path segment), so already-printed QRs keep
-  // working.
-  static const String bookingHost = 'https://VipVish1991.github.io/drsListing-web';
-  static const String bookingSharedSecret = 'cAZrwHpDFJ4HaSNXowJnmvzi-0YD5rYE';
-
   // ── Push notifications (FCM) ─────────────────────────────────────
   // Shared secret that gates the notifications Edge Function, replayed as
   // the `x-notify-token` header — same pattern as the booking secret, but a
@@ -78,14 +44,16 @@ class AppConstants {
   /// URL of the notifications Edge Function (FCM push sending).
   static String get notifyFunctionUrl =>
       '$supabaseUrl/functions/v1/notifications';
+
+  // ── Browser booking page (static HTML on GitHub Pages) ──────────
+  static const String bookingHost = 'https://VipVish1991.github.io/drsListing-web';
+  static const String bookingSharedSecret = 'cAZrwHpDFJ4HaSNXowJnmvzi-0YD5rYE';
+
+  /// Generates the booking URL for a given doctor. Patients scan the QR
+  /// code to open the static booking page in their browser.
   static String bookingPageUrl(String placeId, {String? doctorName}) {
-    // Flutter web app deployed to GitHub Pages — the hash route
-    // #/web-booking loads the full booking screen with UPI payment,
-    // history, and cancel support. The ?doctor= param tells the app
-    // which doctor to load. The token preserves backward compat with
-    // the old Edge Function flow (ignored by the Flutter app).
     final buffer = StringBuffer(
-      '$bookingHost/#/web-booking'
+      '$bookingHost/booking.html'
       '?doctor=${Uri.encodeComponent(placeId)}'
       '&token=$bookingSharedSecret',
     );
