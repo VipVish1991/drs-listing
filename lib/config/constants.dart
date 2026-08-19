@@ -107,7 +107,7 @@ class AppConstants {
 
   // Groq (free AI API, OpenAI-compatible)
   static const String groqBaseUrl = 'https://api.groq.com/openai/v1';
-  static const String groqModel = 'llama-3.3-70b-versatile';
+  static const String groqModel = 'openai/gpt-oss-120b';
 
   // App Settings
   static const int splashDuration = 3; // seconds

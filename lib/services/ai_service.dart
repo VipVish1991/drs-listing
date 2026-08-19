@@ -55,8 +55,18 @@ class AiService {
         final data = jsonDecode(response.body);
         final content = data['choices'][0]['message']['content'] as String;
 
-        // Strip markdown code-block fences that some models wrap JSON in
+        // Strip markdown code-block fences and <think> tags that some models wrap JSON in
         String cleaned = content.trim();
+
+        // Remove <think>...</think> blocks (Qwen, etc.)
+        final thinkStart = cleaned.indexOf('<think>');
+        if (thinkStart != -1) {
+          final thinkEnd = cleaned.indexOf('</think>', thinkStart);
+          if (thinkEnd != -1) {
+            cleaned = (cleaned.substring(0, thinkStart) + cleaned.substring(thinkEnd + 9)).trim();
+          }
+        }
+
         if (cleaned.startsWith('```')) {
           // Remove opening ```json or ``` and any trailing ```
           final firstNewline = cleaned.indexOf('\n');
