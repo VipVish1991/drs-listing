@@ -47,7 +47,8 @@ class AiService {
             {'role': 'user', 'content': message},
           ],
           'temperature': 0.3,
-          'max_tokens': 500,
+          'max_tokens': 1500,
+          'reasoning_effort': 'low',
         }),
       );
 
