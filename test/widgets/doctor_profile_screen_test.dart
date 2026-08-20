@@ -145,7 +145,7 @@ void main() {
       doctorName: doctor.name,
     );
     expect(expectedUrl, startsWith('https://'));
-    expect(expectedUrl, contains('booking.html?doctor=${doctor.placeId}'));
+    expect(expectedUrl, contains('/book/${doctor.placeId}'));
     expect(expectedUrl, contains('token=')); // shared secret in URL
     expect(find.text(expectedUrl), findsOneWidget);
 
@@ -180,8 +180,8 @@ void main() {
       expect(bookingUrl, contains(AppConstants.bookingHost));
       expect(bookingUrl, isNot(contains(AppConstants.supabaseUrl)));
 
-      // Path + query shape: booking.html?doctor=<placeId>&token=...&name=...
-      expect(bookingUrl, contains('booking.html?doctor=${doctor.placeId}'));
+      // Path + query shape: /book/<placeId>?token=...&name=...
+      expect(bookingUrl, contains('/book/${doctor.placeId}'));
       expect(bookingUrl, contains('token=${AppConstants.bookingSharedSecret}'));
       expect(bookingUrl, contains('name=${Uri.encodeComponent(doctor.name)}'));
 
