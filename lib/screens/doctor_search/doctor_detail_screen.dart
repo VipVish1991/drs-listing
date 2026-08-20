@@ -8,6 +8,7 @@ import '../../models/doctor_slot_model.dart';
 import '../../models/unavailable_range.dart';
 import '../../services/launch_service.dart';
 import '../../services/places_service.dart';
+import '../../config/constants.dart';
 import '../../services/share_service.dart';
 import '../../utils/extensions.dart';
 import '../../utils/snackbar_helpers.dart';
@@ -1037,7 +1038,13 @@ class _StickyActionBarState extends State<_StickyActionBar> {
             _CircleActionButton(
               icon: Icons.share_rounded,
               color: const Color(0xFF10B981),
-              onTap: () => ShareService.shareDoctorLink(doctor),
+              onTap: () => ShareService.shareBookingPageLink(
+                AppConstants.bookingPageUrl(
+                  doctor.placeId,
+                  doctorName: doctor.name,
+                ),
+                doctorName: doctor.name,
+              ),
             ),
             const SizedBox(width: 10),
             // Book Appointment button — shows spinner while checking slots
