@@ -194,7 +194,7 @@ class AppointmentController extends GetxController {
   }
 
   /// Parse an appointment's `yyyy-MM-dd` + `HH:MM AM/PM` into a [DateTime].
-  DateTime? _parseAppointmentDateTime(AppointmentModel appointment) {
+  static DateTime? _parseAppointmentDateTime(AppointmentModel appointment) {
     final dateStr = appointment.appointmentDate;
     final timeStr = appointment.appointmentTime;
     if (dateStr == null || dateStr.isEmpty) return null;
@@ -304,9 +304,16 @@ class AppointmentController extends GetxController {
   }) {
     var hasActive = false;
     for (final a in appointments) {
+      // Use effective-status logic: an Upcoming appointment whose
+      // time has passed is effectively Completed, so it must not
+      // block a new booking.
       final isActive = a.status == AppointmentStatus.pending ||
           a.status == AppointmentStatus.upcoming;
       if (!isActive) continue;
+      if (a.status == AppointmentStatus.upcoming) {
+        final dt = _parseAppointmentDateTime(a);
+        if (dt != null && dt.isBefore(DateTime.now())) continue;
+      }
       hasActive = true;
       if (doctorPlaceId != null && a.doctorPlaceId == doctorPlaceId) {
         return 'You already have an active appointment with this doctor. '

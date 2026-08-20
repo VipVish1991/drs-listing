@@ -136,6 +136,72 @@ void main() {
       );
       expect(msg, isNull);
     });
+
+    test('past Upcoming appointment does not block (time has passed)', () {
+      // An Upcoming appointment whose date+time is in the past should
+      // be treated as effectively Completed and must NOT block a new
+      // booking with the same doctor.
+      final yesterday = DateTime.now().subtract(const Duration(days: 1));
+      final dateStr =
+          '${yesterday.year}-${yesterday.month.toString().padLeft(2, '0')}-${yesterday.day.toString().padLeft(2, '0')}';
+      final msg = AppointmentController.bookingBlockMessage(
+        [
+          AppointmentModel(
+            appointmentId: 'APT-past',
+            status: AppointmentStatus.upcoming,
+            doctorPlaceId: 'PLACE-DOC-A',
+            appointmentDate: dateStr,
+            appointmentTime: '09:30 AM',
+          ),
+        ],
+        doctorPlaceId: 'PLACE-DOC-A',
+      );
+      expect(msg, isNull);
+    });
+
+    test('future Upcoming appointment still blocks', () {
+      // An Upcoming appointment whose date+time is in the future should
+      // still block a new booking with the same doctor.
+      final tomorrow = DateTime.now().add(const Duration(days: 1));
+      final dateStr =
+          '${tomorrow.year}-${tomorrow.month.toString().padLeft(2, '0')}-${tomorrow.day.toString().padLeft(2, '0')}';
+      final msg = AppointmentController.bookingBlockMessage(
+        [
+          AppointmentModel(
+            appointmentId: 'APT-future',
+            status: AppointmentStatus.upcoming,
+            doctorPlaceId: 'PLACE-DOC-A',
+            appointmentDate: dateStr,
+            appointmentTime: '09:30 AM',
+          ),
+        ],
+        doctorPlaceId: 'PLACE-DOC-A',
+      );
+      expect(msg, isNotNull);
+      expect(msg, contains('active appointment with this doctor'));
+    });
+
+    test('Upcoming today with future time still blocks', () {
+      // An Upcoming appointment today whose time hasn't arrived yet
+      // should still block.
+      final now = DateTime.now();
+      final dateStr =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final msg = AppointmentController.bookingBlockMessage(
+        [
+          AppointmentModel(
+            appointmentId: 'APT-today-future',
+            status: AppointmentStatus.upcoming,
+            doctorPlaceId: 'PLACE-DOC-A',
+            appointmentDate: dateStr,
+            appointmentTime: '11:59 PM',
+          ),
+        ],
+        doctorPlaceId: 'PLACE-DOC-A',
+      );
+      expect(msg, isNotNull);
+      expect(msg, contains('active appointment with this doctor'));
+    });
   });
 
   group('AppointmentController.bookingBlockMessageFromError', () {

@@ -359,6 +359,27 @@ async function historyPayload(mobileRaw: string) {
 
 // ── One-active-booking-per-doctor gate ─────────────────────────────
 
+/// Parse a yyyy-MM-dd date + "HH:MM AM/PM" time string into a Date.
+/// Returns null on unparseable input — callers treat null as "unknown,
+/// assume active" so the gate fails open.
+function parseSlotDateTime(dateStr: string, timeStr: string): Date | null {
+  try {
+    const cleaned = timeStr.trim().toUpperCase();
+    const isPm = cleaned.endsWith("PM");
+    const timeOnly = cleaned.replace(/AM|PM/g, "").trim();
+    const [hourStr, minStr] = timeOnly.split(":");
+    let hour = parseInt(hourStr, 10);
+    const minute = minStr ? parseInt(minStr, 10) : 0;
+    if (isPm && hour !== 12) hour += 12;
+    if (!isPm && hour === 12) hour = 0;
+    // Construct in local timezone via components.
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return new Date(y, m - 1, d, hour, minute);
+  } catch {
+    return null;
+  }
+}
+
 /// The "one active booking per doctor" rule: returns an error message
 /// when the patient already holds an active (Pending/Upcoming) booking
 /// with [doctorPlaceId] — other doctors stay bookable, and the same
@@ -374,17 +395,30 @@ async function bookingGateError(
 ): Promise<string | null> {
   const active = await supabase
     .from("appointments")
-    .select("appointment_id")
+    .select("appointment_id, status, appointment_date, appointment_time")
     .eq("user_id", userId)
     .eq("doctor_place_id", doctorPlaceId)
     .in("status", ["Pending", "Upcoming"])
-    .limit(1);
+    .limit(5);
   if (active.error) {
     console.error("bookingGateError: active check failed:", active.error.message);
     return null;
   }
   if (active.data && active.data.length > 0) {
-    return GATE_ACTIVE_MSG;
+    // An Upcoming appointment whose time has passed is effectively
+    // Completed and must not block a new booking (mirrors the app's
+    // effectiveStatus logic).
+    const now = new Date();
+    const hasActive = active.data.some((row) => {
+      if (row.status === "Pending") return true;
+      // Upcoming: parse date+time and compare to now.
+      if (row.status === "Upcoming" && row.appointment_date && row.appointment_time) {
+        const dt = parseSlotDateTime(row.appointment_date, row.appointment_time);
+        if (dt && dt.getTime() < now.getTime()) return false; // past → not active
+      }
+      return true;
+    });
+    if (hasActive) return GATE_ACTIVE_MSG;
   }
   return null;
 }
