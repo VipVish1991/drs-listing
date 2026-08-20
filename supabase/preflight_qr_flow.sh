@@ -174,7 +174,7 @@ if [[ -z "${BOOKING_HOST}" || "${BOOKING_HOST}" == *"REPLACE-WITH"* ]]; then
   echo "        The static-page half of the QR chain can't be verified yet."
   STATIC_SKIPPED=1
 else
-  STATIC_URL="${BOOKING_HOST}/book/${DOCTOR_ENC}?token=${BOOKING_SECRET}"
+  STATIC_URL="${BOOKING_HOST}/booking.html?doctor=${DOCTOR_ENC}&token=${BOOKING_SECRET}"
   STATIC_CODE="$(curl -s -o /tmp/preflight_static_body.html -w '%{http_code}' -L --max-time 20 -H "User-Agent: ${UA}" "${STATIC_URL}")"
   BODY="$(cat /tmp/preflight_static_body.html 2>/dev/null)"
   if [[ "${STATIC_CODE}" == "200" && -n "${BODY}" && "${BODY}" == *"Book an Appointment"* ]]; then

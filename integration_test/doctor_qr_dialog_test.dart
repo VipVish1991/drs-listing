@@ -126,8 +126,8 @@ void main() {
         reason: 'dialog must show the booking URL under the QR');
     final urlText = tester.widget<Text>(visibleUrl).data!;
     // Static booking page (booking.html) on GitHub Pages.
-    // The placeId rides in the /book/<placeId> path.
-    expect(urlText, contains('/book/'));
+    // The placeId rides in the ?doctor= query param.
+    expect(urlText, contains('booking.html?doctor='));
     expect(urlText, contains('token=${AppConstants.bookingSharedSecret}'));
     expect(urlText, contains('name='));
     debugPrint('QR dialog booking URL: $urlText');

@@ -52,14 +52,16 @@ class AppConstants {
   /// Generates the booking URL for a given doctor. Patients scan the QR
   /// code to open the static booking page in their browser.
   ///
-  /// Uses the `/book/<placeId>` path format — the Netlify/Vercel `_redirects`
-  /// rewrites it to `booking.html` (status 200) so the browser URL stays
-  /// clean and `booking.html` reads the placeId from the path. Falls back
-  /// to the `?doctor=` query param on GitHub Pages (no rewrite support).
+  /// Uses `booking.html?doctor=<placeId>` — the static HTML page on
+  /// GitHub Pages reads the placeId from the query param. The page also
+  /// supports `/book/<placeId>` path format via the _redirects rewrite
+  /// (Netlify/Vercel), but the query-param form is the primary format
+  /// for GitHub Pages where _redirects is not processed.
   static String bookingPageUrl(String placeId, {String? doctorName}) {
     final buffer = StringBuffer(
-      '$bookingHost/book/${Uri.encodeComponent(placeId)}'
-      '?token=$bookingSharedSecret',
+      '$bookingHost/booking.html'
+      '?doctor=${Uri.encodeComponent(placeId)}'
+      '&token=$bookingSharedSecret',
     );
     if (doctorName != null && doctorName.isNotEmpty) {
       buffer.write('&name=${Uri.encodeComponent(doctorName)}');

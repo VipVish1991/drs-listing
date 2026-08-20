@@ -191,9 +191,9 @@ fi
 # ── 3. /book/ form renders visible for a valid QR link ──────────────
 echo ""
 echo "[3/4] booking.html form renders (HTTP 200, visible, not fail-closed)..."
-BOOK_URL="${BOOKING_HOST}/book/${DOCTOR_ENC}?token=${BOOKING_SECRET}&name=${NAME_ENC}"
-# The /book/<placeId> path rewrites to booking.html (status 200) via
-# _redirects, so the browser URL stays clean.
+BOOK_URL="${BOOKING_HOST}/booking.html?doctor=${DOCTOR_ENC}&token=${BOOKING_SECRET}&name=${NAME_ENC}"
+# The whole point of the booking.html URL: it is a REAL file, so Pages
+# answers 200 (the /book/<placeId> path would answer 404 via 404.html).
 BOOK_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 20 -H "User-Agent: ${UA}" "${BOOK_URL}")"
 dump_dom "${BOOK_URL}" "${DOM_TMP}/book.html"
 TITLE="$(grep -oE 'Book with [^<]*' "${DOM_TMP}/book.html" | head -1)"
