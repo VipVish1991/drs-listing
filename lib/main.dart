@@ -7,6 +7,7 @@ import 'config/theme.dart';
 import 'services/api_health_service.dart';
 import 'services/connectivity_service.dart';
 import 'services/notification_service.dart';
+import 'services/room_allocation_service.dart';
 import 'services/status_bar_service.dart';
 import 'services/supabase_service.dart';
 import 'services/local_storage_service.dart';
@@ -46,6 +47,10 @@ void main() async {
   // Google Play Services, and awaiting them indefinitely would block app
   // startup — a timeout keeps the boot path resilient (never throws).
   await NotificationService.instance.initBounded();
+
+  // Release any meeting rooms that were occupied by consultations that
+  // ended while the app was closed (safety-net cleanup). Non-fatal.
+  RoomAllocationService.instance.cleanupExpiredRooms();
 
   // Inject dependencies.
   //

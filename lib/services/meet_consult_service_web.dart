@@ -3,32 +3,35 @@ import 'package:flutter/widgets.dart';
 import '../models/appointment_model.dart';
 import 'launch_service.dart';
 import 'meet_consult_service.dart';
+import 'room_allocation_service.dart';
 
 /// Web implementation of the Meet consultation flow.
 ///
-/// The vendored `google_meet_sdk` cannot run on web, but every
-/// consultation uses the same fixed static room — [kStaticMeetLink] —
-/// pre-filled on new appointments, so the web build simply opens that
-/// room (the stored link when one exists, the static link otherwise).
+/// Before opening a room, the service checks the meeting_rooms pool in
+/// Supabase to ensure only 2 people (doctor + patient) join the same room
+/// at a time. Falls back to the stored link or the static room if the pool
+/// is exhausted.
 Future<MeetJoinResult> joinConsultation(
   BuildContext context,
   AppointmentModel appointment,
 ) async {
-  // A stored link means the meeting already exists — open that exact room.
-  // Legacy rows without one fall back to the static room so every meeting
-  // still lands in the same place.
-  final stored = appointment.meetLink;
-  if (stored != null && stored.isNotEmpty) {
-    return _openLink(stored);
-  }
-  return _openLink(kStaticMeetLink);
+  final roomUrl = await RoomAllocationService.instance.allocateRoom(
+    appointmentId: appointment.appointmentId,
+    existingMeetLink: appointment.meetLink,
+  );
+
+  return _openLink(roomUrl);
 }
 
 Future<MeetJoinResult> startConsultation(
   BuildContext context, {
   required String title,
 }) async {
-  return _openLink(kStaticMeetLink);
+  final roomUrl = await RoomAllocationService.instance.allocateRoom(
+    appointmentId: 'adhoc_${DateTime.now().millisecondsSinceEpoch}',
+    existingMeetLink: kStaticMeetLink,
+  );
+  return _openLink(roomUrl);
 }
 
 Future<MeetJoinResult> _openLink(String link) async {

@@ -7,6 +7,7 @@ import '../models/doctor_model.dart';
 import '../models/doctor_slot_model.dart';
 import '../models/payment_model.dart';
 import '../services/places_service.dart';
+import '../services/room_allocation_service.dart';
 import '../services/supabase_service.dart';
 import '../services/notification_service.dart';
 import '../utils/payment_summary.dart';
@@ -315,6 +316,14 @@ class DoctorController extends GetxController {
           appointmentId,
         ),
       );
+      // Free the meeting room when the consultation ends so the next
+      // booking can use it (fire-and-forget — a failure must not block
+      // the status update).
+      if (status == 'Completed' || status == 'Cancelled') {
+        async.unawaited(
+          RoomAllocationService.instance.freeRoom(appointmentId),
+        );
+      }
       await loadAppointments();
       await loadStats();
     } catch (_) {}
@@ -381,6 +390,10 @@ class DoctorController extends GetxController {
         NotificationCenterController.instance.markAppointmentRead(
           appointmentId,
         ),
+      );
+      // Free the meeting room so the next booking can use it.
+      async.unawaited(
+        RoomAllocationService.instance.freeRoom(appointmentId),
       );
       await loadAppointments();
       await loadStats();

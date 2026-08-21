@@ -6,6 +6,7 @@ import '../models/doctor_model.dart';
 import '../models/doctor_slot_model.dart';
 import '../models/payment_model.dart';
 import '../services/meet_consult_service.dart';
+import '../services/room_allocation_service.dart';
 import '../services/supabase_service.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/doctor_controller.dart';
@@ -540,6 +541,10 @@ class AppointmentController extends GetxController {
           appointmentId: appointmentId,
           senderMobile: _authController.currentUser.value?.mobile ?? '',
         ),
+      );
+      // Free the meeting room so the next booking can use it.
+      unawaited(
+        RoomAllocationService.instance.freeRoom(appointmentId),
       );
       await loadAppointments();
     } catch (_) {}
