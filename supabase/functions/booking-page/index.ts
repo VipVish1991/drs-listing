@@ -1060,7 +1060,7 @@ function renderPage(
 
   const intro = missingDoctor
     ? "This booking link is incomplete. Please rescan the QR code from the doctor profile."
-    : "Book an in-clinic appointment below. For video or tele consultations, download the app.";
+    : "Book an in-clinic appointment below.";
 
   const errorHtml = error ? `<div class="status info">${escapeHtml(error)}</div>` : "";
 
@@ -1092,25 +1092,11 @@ function renderPage(
     </form>
     <div id="status" class="status"></div>`;
 
-  // App download section for Video / Tele consultations
+  // App download section for Video / Tele consultations — rendered as
+  // per-type cards (populated dynamically by JS based on available slots).
   const appDownloadHtml = missingDoctor
     ? ""
-    : `<div id="appDownloadSection" style="display:none;">
-      <div class="divider"></div>
-      <h3 class="section-title">Video &amp; Tele Consultation</h3>
-      <p class="section-desc">For video or tele consultations, please download the DrsListing app.</p>
-      <div class="store-buttons">
-        <a href="https://play.google.com/store/apps/details?id=com.drslisting.app" target="_blank" rel="noopener" class="store-btn android">
-          <svg width="20" height="22" viewBox="0 0 20 22" fill="none"><path d="M1 1l9.5 10L1 21V1z" fill="#fff"/><path d="M14.5 8.5L11 11l3.5 2.5 3-2-3-3z" fill="#fff"/><path d="M1 1l13.5 7.5-4 3.5L1 1z" fill="#4ECDC4"/><path d="M1 21l9.5-11 4 3.5L1 21z" fill="#4ECDC4"/></svg>
-          <span>GET IT ON<br><b>Google Play</b></span>
-        </a>
-        <a href="https://apps.apple.com/app/drslisting/id1234567890" target="_blank" rel="noopener" class="store-btn ios">
-          <svg width="18" height="22" viewBox="0 0 18 22" fill="none"><path d="M14.5 11.5c0-2.5 2-3.7 2.1-3.8-1.1-1.7-2.9-1.9-3.5-2-1.5-.2-2.9.9-3.7.9-.8 0-2-.9-3.2-.8-1.6.1-3.1.9-3.9 2.4-1.7 2.9-.4 7.3 1.2 9.6.8 1.1 1.8 2.4 3.1 2.3 1.2-.1 1.7-.8 3.1-.8 1.5 0 2 .8 3.2.8 1.3 0 2.2-1.2 3-2.3.9-1.3 1.3-2.5 1.3-2.6-.1-.1-2.5-1-2.5-3.8zM12.3 3.9c.7-.8 1.1-2 1-3.1-1 0-2.2.7-2.9 1.5-.7.7-1.2 1.9-1 3.1 1.1.1 2.2-.6 2.9-1.5z" fill="#fff"/></svg>
-          <span>Download on the<br><b>App Store</b></span>
-        </a>
-      </div>
-      <p class="section-note">Get AI health assistant, video consultations, appointment management and more.</p>
-    </div>`;
+    : `<div id="appDownloadSection"></div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1194,17 +1180,53 @@ function renderPage(
     .divider { height: 1px; background: #E5E7EB; margin: 24px 0; }
     .section-title { font-size: 16px; font-weight: 700; color: #1F2933; margin-bottom: 6px; }
     .section-desc { font-size: 13px; color: #6B7280; line-height: 1.5; margin-bottom: 16px; }
-    .store-buttons { display: flex; gap: 12px; margin-bottom: 12px; }
+    .download-card {
+      background: linear-gradient(135deg, #F0FDF9, #ECFDF5);
+      border: 1.5px solid #D1FAE5;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 12px;
+    }
+    .download-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .download-card-type {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .download-card-type-icon {
+      width: 36px; height: 36px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    .download-card-type-icon.tele { background: #DBEAFE; }
+    .download-card-type-icon.video { background: #EDE9FE; }
+    .download-card-type-label {
+      font-size: 14px; font-weight: 700; color: #1F2933;
+    }
+    .download-card-fee {
+      font-size: 12px; font-weight: 700; color: #0E7C66;
+      background: rgba(14,124,102,0.08); padding: 4px 10px;
+      border-radius: 8px;
+    }
+    .download-card p {
+      font-size: 12.5px; color: #6B7280; line-height: 1.5;
+      margin-bottom: 14px;
+    }
+    .download-card .store-buttons { margin-bottom: 0; }
+    .store-buttons { display: flex; gap: 10px; }
     .store-btn {
       flex: 1; display: flex; align-items: center; gap: 8px;
-      padding: 12px 14px; border-radius: 12px;
-      text-decoration: none; font-size: 11px; color: #fff;
-      line-height: 1.3; transition: transform 0.15s;
+      padding: 10px 12px; border-radius: 10px;
+      text-decoration: none; font-size: 10px; color: #fff;
+      line-height: 1.3; transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
     }
     .store-btn:active { transform: scale(0.97); }
+    .store-btn:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.18); }
     .store-btn.android { background: #1F2933; }
     .store-btn.ios { background: #1F2933; }
-    .store-btn b { font-size: 14px; }
+    .store-btn b { font-size: 13px; }
     .section-note { font-size: 11.5px; color: #9CA3AF; text-align: center; line-height: 1.4; }
     .loading-spinner {
       display: inline-block; width: 18px; height: 18px;
@@ -1244,7 +1266,49 @@ function renderPage(
         const teleSlots = slots.filter(s => s.schedule_type === 'tele' && s.is_enabled);
         if (videoSlots.length > 0 || teleSlots.length > 0) {
           const section = document.getElementById('appDownloadSection');
-          if (section) section.style.display = 'block';
+          if (section) {
+            section.style.display = 'block';
+            let cardsHtml = '<div class="divider"></div>';
+            const playStore = 'https://play.google.com/store/apps/details?id=com.drslisting.app';
+            const appStore = 'https://apps.apple.com/app/drslisting/id1234567890';
+            const androidSvg = '<svg width="18" height="20" viewBox="0 0 20 22" fill="none"><path d="M1 1l9.5 10L1 21V1z" fill="#fff"/><path d="M14.5 8.5L11 11l3.5 2.5 3-2-3-3z" fill="#fff"/><path d="M1 1l13.5 7.5-4 3.5L1 1z" fill="#4ECDC4"/><path d="M1 21l9.5-11 4 3.5L1 21z" fill="#4ECDC4"/></svg>';
+            const iosSvg = '<svg width="16" height="20" viewBox="0 0 18 22" fill="none"><path d="M14.5 11.5c0-2.5 2-3.7 2.1-3.8-1.1-1.7-2.9-1.9-3.5-2-1.5-.2-2.9.9-3.7.9-.8 0-2-.9-3.2-.8-1.6.1-3.1.9-3.9 2.4-1.7 2.9-.4 7.3 1.2 9.6.8 1.1 1.8 2.4 3.1 2.3 1.2-.1 1.7-.8 3.1-.8 1.5 0 2 .8 3.2.8 1.3 0 2.2-1.2 3-2.3.9-1.3 1.3-2.5 1.3-2.6-.1-.1-2.5-1-2.5-3.8zM12.3 3.9c.7-.8 1.1-2 1-3.1-1 0-2.2.7-2.9 1.5-.7.7-1.2 1.9-1 3.1 1.1.1 2.2-.6 2.9-1.5z" fill="#fff"/></svg>';
+            const storeBtns = '<div class="store-buttons">'
+              + '<a href="' + playStore + '" target="_blank" rel="noopener" class="store-btn android">'
+              + androidSvg + '<span>GET IT ON<br><b>Google Play</b></span></a>'
+              + '<a href="' + appStore + '" target="_blank" rel="noopener" class="store-btn ios">'
+              + iosSvg + '<span>Download on the<br><b>App Store</b></span></a>'
+              + '</div>';
+            if (teleSlots.length > 0) {
+              const teleFee = teleSlots.reduce((max, s) => Math.max(max, s.fee || 0), 0);
+              cardsHtml += '<div class="download-card">'
+                + '<div class="download-card-header">'
+                + '<div class="download-card-type">'
+                + '<div class="download-card-type-icon tele">\u{1F4DE}</div>'
+                + '<span class="download-card-type-label">Tele Consultation</span>'
+                + '</div>'
+                + (teleFee > 0 ? '<span class="download-card-fee">\u20B9' + teleFee + '</span>' : '')
+                + '</div>'
+                + '<p>Book a phone consultation with the doctor. Download the app to join.</p>'
+                + storeBtns
+                + '</div>';
+            }
+            if (videoSlots.length > 0) {
+              const videoFee = videoSlots.reduce((max, s) => Math.max(max, s.fee || 0), 0);
+              cardsHtml += '<div class="download-card">'
+                + '<div class="download-card-header">'
+                + '<div class="download-card-type">'
+                + '<div class="download-card-type-icon video">\u{1F3AC}</div>'
+                + '<span class="download-card-type-label">Video Consultation</span>'
+                + '</div>'
+                + (videoFee > 0 ? '<span class="download-card-fee">\u20B9' + videoFee + '</span>' : '')
+                + '</div>'
+                + '<p>Get a face-to-face video call with the doctor. Download the app to start.</p>'
+                + storeBtns
+                + '</div>';
+            }
+            section.innerHTML = cardsHtml;
+          }
         }
         if (clinicSlots.length > 0) {
           const slotSection = document.getElementById('slotSection');

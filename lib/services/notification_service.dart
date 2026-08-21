@@ -464,10 +464,27 @@ class NotificationService {
     );
   }
 
+  /// Notify the patient that the doctor marked their payment as Paid or
+  /// Refunded. Called after a successful payment status update —
+  /// fire-and-forget.
+  Future<void> notifyPaymentStatusChanged({
+    required String appointmentId,
+    required String paymentStatus,
+    required String senderMobile,
+  }) async {
+    await _sendEvent(
+      event: 'payment_status_changed',
+      appointmentId: appointmentId,
+      paymentStatus: paymentStatus,
+      senderMobile: senderMobile,
+    );
+  }
+
   Future<void> _sendEvent({
     required String event,
     required String appointmentId,
     String? status,
+    String? paymentStatus,
     required String senderMobile,
   }) async {
     try {
@@ -483,6 +500,8 @@ class NotificationService {
               'event': event,
               'appointment_id': appointmentId,
               if (status != null && status.isNotEmpty) 'status': status,
+              if (paymentStatus != null && paymentStatus.isNotEmpty)
+                'payment_status': paymentStatus,
               'sender_mobile': senderMobile,
             }),
           )

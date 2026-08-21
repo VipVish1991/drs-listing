@@ -23,7 +23,7 @@ void main() {
   });
 
   group('defaults', () {
-    test('all five event toggles default to ON', () {
+    test('all six event toggles default to ON', () {
       final c = Get.put(NotificationSettingsController());
       expect(c.prefs[NotificationSettingsController.eventBooked], isTrue);
       expect(c.prefs[NotificationSettingsController.eventCancelled], isTrue);
@@ -36,6 +36,10 @@ void main() {
         c.prefs[NotificationSettingsController.eventStatusChanged],
         isTrue,
       );
+      expect(
+        c.prefs[NotificationSettingsController.eventPaymentStatusChanged],
+        isTrue,
+      );
     });
 
     test('the master switch defaults to ON', () {
@@ -44,7 +48,7 @@ void main() {
       expect(c.prefs[NotificationSettingsController.eventAll], isTrue);
     });
 
-    test('exposes exactly the five supported event keys', () {
+    test('exposes exactly the six supported event keys', () {
       expect(
         NotificationSettingsController.eventKeys,
         unorderedEquals([
@@ -53,6 +57,7 @@ void main() {
           'appointment_rescheduled',
           'appointment_rescheduled_by_doctor',
           'appointment_status_changed',
+          'payment_status_changed',
         ]),
       );
     });
@@ -67,6 +72,7 @@ void main() {
           'appointment_rescheduled',
           'appointment_rescheduled_by_doctor',
           'appointment_status_changed',
+          'payment_status_changed',
         ]),
       );
     });

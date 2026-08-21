@@ -39,7 +39,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('renders the header, master switch and all five alert toggles',
+  testWidgets('renders the header, master switch and all six alert toggles',
       (tester) async {
     await pumpScreen(tester);
 
@@ -51,7 +51,8 @@ void main() {
     expect(find.text('Reschedules'), findsOneWidget);
     expect(find.text('Clinic Reschedules'), findsOneWidget);
     expect(find.text('Status Updates'), findsOneWidget);
-    expect(find.byType(SwitchListTile), findsNWidgets(6));
+    expect(find.text('Payment Updates'), findsOneWidget);
+    expect(find.byType(SwitchListTile), findsNWidgets(7));
   });
 
   testWidgets('all toggles start ON by default', (tester) async {
@@ -60,7 +61,7 @@ void main() {
     final switches = tester
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))
         .toList();
-    expect(switches, hasLength(6));
+    expect(switches, hasLength(7));
     expect(switches.every((s) => s.value), isTrue);
   });
 
@@ -87,12 +88,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Master switch is off; the five event switches are disabled (null
+    // Master switch is off; the six event switches are disabled (null
     // onChanged) and visually off even though their saved values are true.
     final switches = tester
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))
         .toList();
-    expect(switches, hasLength(6));
+    expect(switches, hasLength(7));
     expect(switches[0].value, isFalse); // All Notifications (master)
     expect(switches[0].onChanged, isNotNull); // master itself stays tappable
     expect(switches[1].value, isFalse); // New Bookings — shown off
@@ -105,6 +106,8 @@ void main() {
     expect(switches[4].onChanged, isNull);
     expect(switches[5].value, isFalse); // Status Updates
     expect(switches[5].onChanged, isNull);
+    expect(switches[6].value, isFalse); // Payment Updates
+    expect(switches[6].onChanged, isNull);
 
     // The granular choices are preserved underneath.
     expect(
@@ -223,12 +226,13 @@ void main() {
     final switches = tester
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))
         .toList();
-    expect(switches, hasLength(6));
+    expect(switches, hasLength(7));
     expect(switches[0].value, isTrue); // Master — on
     expect(switches[1].value, isFalse); // New Bookings — off
     expect(switches[2].value, isTrue); // Cancellations — on
     expect(switches[3].value, isTrue); // Reschedules — on
     expect(switches[4].value, isTrue); // Clinic Reschedules — on
     expect(switches[5].value, isTrue); // Status Updates — on
+    expect(switches[6].value, isTrue); // Payment Updates — on
   });
 }

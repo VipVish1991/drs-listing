@@ -148,7 +148,19 @@ class DoctorController extends GetxController {
         refundTransactionId: refundTransactionId,
         refundRawResponse: refundRawResponse,
       );
-      if (ok) await loadPayments();
+      if (ok) {
+        // Notify the patient their payment status changed (fire-and-forget).
+        final doctorMobile =
+            Get.find<AuthController>().currentUser.value?.mobile;
+        async.unawaited(
+          NotificationService.instance.notifyPaymentStatusChanged(
+            appointmentId: payment.appointmentId,
+            paymentStatus: status,
+            senderMobile: doctorMobile ?? '',
+          ),
+        );
+        await loadPayments();
+      }
       return ok;
     } catch (_) {
       return false;

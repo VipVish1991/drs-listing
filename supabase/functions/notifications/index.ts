@@ -88,6 +88,7 @@ serve(async (req) => {
     const event = body?.event ?? "";
     const appointmentId = (body?.appointment_id ?? "").trim();
     const status = (body?.status ?? "").trim();
+    const paymentStatus = (body?.payment_status ?? "").trim();
 
     if (
       ![
@@ -96,6 +97,7 @@ serve(async (req) => {
         "appointment_rescheduled",
         "appointment_rescheduled_by_doctor",
         "appointment_status_changed",
+        "payment_status_changed",
       ].includes(event)
     ) {
       return jsonResponse(
@@ -183,7 +185,8 @@ serve(async (req) => {
 
     // ── Route the notification ────────────────────────────────────
     // Patient-initiated events (booked / cancelled / rescheduled) notify
-    // the DOCTOR; status changes notify the PATIENT.
+    // the DOCTOR; status changes and payment status changes notify the
+    // PATIENT.
     const isDoctorEvent =
       event === "appointment_booked" ||
       event === "appointment_cancelled" ||
@@ -254,22 +257,43 @@ serve(async (req) => {
     }
 
     // event is patient-directed: "appointment_status_changed" (doctor
-    // changed the status) or "appointment_rescheduled_by_doctor" (doctor
-    // moved the appointment to a new slot). Both notify the PATIENT (all
-    // their devices), with the recipient's notification_prefs checked under
-    // the event's own key.
-    const newStatus = status || apt.status || "";
-    const friendly = newStatus.toLowerCase();
+    // changed the status), "appointment_rescheduled_by_doctor" (doctor
+    // moved the appointment to a new slot), or "payment_status_changed"
+    // (doctor marked payment as Paid or Refunded). All notify the PATIENT
+    // (all their devices), with the recipient's notification_prefs checked
+    // under the event's own key.
+const isPaymentEvent = event === "payment_status_changed";
+    const movedByClinic = event === "appointment_rescheduled_by_doctor";
     const date = formatDisplayDate(apt.appointment_date ?? "");
     const time = apt.appointment_time ?? "";
     const when = [date, time].filter(Boolean).join(" at ");
-    const movedByClinic = event === "appointment_rescheduled_by_doctor";
-    const title = movedByClinic
-      ? "Appointment Rescheduled by Clinic"
-      : `Appointment ${newStatus || "Updated"}`;
-    const bodyText = movedByClinic
-      ? `${apt.doctor_name ?? "Your doctor"} moved your appointment to ${when || "a new slot"}.`
-      : `${apt.doctor_name ?? "Your doctor"} ${
+
+    let title = "";
+    let bodyText = "";
+    const payload: Record<string, string> = {
+      type: event,
+      appointment_id: apt.appointment_id,
+      doctor_place_id: doctorPlaceId,
+    };
+
+    if (isPaymentEvent) {
+      const pStatus = paymentStatus || "";
+      const pFriendly = pStatus.toLowerCase();
+      title = `Payment ${pStatus || "Updated"}`;
+      bodyText = pFriendly === "paid"
+        ? `${apt.doctor_name ?? "The clinic"} marked your payment of ₹${(apt as any).payment_amount ?? ""} as paid${when ? " for " + when : ""}.`
+        : pFriendly === "refunded"
+          ? `${apt.doctor_name ?? "The clinic"} has refunded your payment${when ? " for " + when : ""}.`
+          : `${apt.doctor_name ?? "The clinic"} updated your payment status to ${pStatus}.`;
+      payload.payment_status = pStatus;
+    } else if (movedByClinic) {
+      title = "Appointment Rescheduled by Clinic";
+      bodyText = `${apt.doctor_name ?? "Your doctor"} moved your appointment to ${when || "a new slot"}.`;
+    } else {
+      const newStatus = status || apt.status || "";
+      const friendly = newStatus.toLowerCase();
+      title = `Appointment ${newStatus || "Updated"}`;
+      bodyText = `${apt.doctor_name ?? "Your doctor"} ${
           friendly === "cancelled"
             ? "cancelled"
             : friendly === "confirmed"
@@ -278,13 +302,8 @@ serve(async (req) => {
                 ? "marked completed"
                 : "updated"
         } your appointment${when ? " on " + when : ""}.`;
-    const payload = {
-      type: event,
-      appointment_id: apt.appointment_id,
-      doctor_place_id: doctorPlaceId,
-      // status travels only for status_changed (the center renders it).
-      ...(movedByClinic ? {} : { status: newStatus }),
-    };
+      payload.status = newStatus;
+    }
     const devices = await filterByPrefs(
       supabase,
       await patientDevices(supabase, apt.user_id),

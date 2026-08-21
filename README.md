@@ -285,26 +285,38 @@ fee chip (e.g. `💵 ₹800 · Offline (Clinic)`) right after booking, and the
 summary the `history` endpoint now attaches — so the patient always sees
 what they owe and what the clinic settled.
 
-## Video / Tele Consultations (Google Meet)
+## Video / Tele Consultations (Join Tele Call)
 
-**VIDEO and TELE (audio) consultations** have a **Join Video Call** button in
+**VIDEO and TELE (audio) consultations** have a **Join Tele Call** button in
 the appointment details sheet (both the patient's My Appointments and the
-doctor's Appointments tab — they share the sheet). Every consultation uses
-**one fixed static Google Meet room** — `https://meet.google.com/rnz-wivx-yze`
-(`kStaticMeetLink` in `lib/services/meet_consult_service.dart`):
+doctor's Appointments tab — they share the sheet). The button is **time-gated**:
+
+- Before the scheduled date/time the button shows a **live countdown**
+  (e.g. "Join in 2h 15m 30s") and is disabled. Tapping it shows an
+  info snackbar with the scheduled start time.
+- Once the appointment time is reached the button enables and reads
+  **"Join Tele Call"**. Tapping it:
+  - **Tele (audio) consultations** — opens the phone dialer directly
+    (Google Meet video is **disabled** for tele calls).
+  - **Video consultations** — opens the shared static Google Meet room
+    in the browser / Meet app.
+
+Every consultation uses **one fixed static Google Meet room**
+(`https://meet.google.com/rnz-wivx-yze`, `kStaticMeetLink` in
+`lib/services/meet_consult_service.dart`) for the video path:
 
 1. **Every new appointment is created with that link pre-filled** in its
    `meet_link` column — the Flutter booking flow and the booking-page
    Edge Function both write the same value, so both sides always join
    the same room.
-2. **Joining always opens that room** in the browser / Google Meet app (the
-   link stored on the appointment when one exists, the static link
-   otherwise for legacy rows) — joining leaves the app so the meeting
-   runs in the browser / Meet app. No Google Sign-In or Calendar API is
-   involved anymore, on mobile or web.
+2. **Joining opens that room** in the browser / Google Meet app (the link
+   stored on the appointment when one exists, the static link otherwise
+   for legacy rows) — joining leaves the app so the meeting runs in the
+   browser / Meet app. No Google Sign-In or Calendar API is involved
+   anymore, on mobile or web.
 
 The vendored `google_meet_sdk` (`third_party/google_meet_sdk/`) is kept
-in the repo but no longer used by the app code.
+in the repo but is only used for the video consultation path.
 
 ## One Active Booking Per Doctor
 

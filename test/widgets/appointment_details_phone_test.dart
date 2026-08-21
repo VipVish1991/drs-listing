@@ -209,7 +209,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Video Consultation'), findsOneWidget);
-      // The chip's icon (the Join Video Call button below adds its own).
+      // The chip's icon (the Join Tele Call button below adds its own).
       expect(
         find.descendant(
           of: find.byKey(
@@ -221,7 +221,7 @@ void main() {
       );
     });
 
-    testWidgets('video consultation shows the Join Video Call button',
+    testWidgets('video consultation shows the Join Tele Call button',
         (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_BTN_1',
@@ -233,17 +233,15 @@ void main() {
 
       await _openSheet(tester, appointment);
 
-      // Remote consultations start the Meet consultation (Google sign-in →
-      // calendar event → link opens externally).
+      // Remote consultations show the Join Tele Call button.
       expect(
-        find.byKey(const ValueKey('join_video_call')),
+        find.byKey(const ValueKey('join_tele_call')),
         findsOneWidget,
       );
-      expect(find.text('Join Video Call'), findsOneWidget);
-      expect(find.byIcon(Icons.videocam_rounded), findsWidgets);
+      expect(find.text('Join Tele Call'), findsOneWidget);
     });
 
-    testWidgets('tele (audio) consultation shows the Join Video Call button',
+    testWidgets('tele (audio) consultation shows the Join Tele Call button',
         (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_BTN_2',
@@ -256,12 +254,12 @@ void main() {
       await _openSheet(tester, appointment);
 
       expect(
-        find.byKey(const ValueKey('join_video_call')),
+        find.byKey(const ValueKey('join_tele_call')),
         findsOneWidget,
       );
     });
 
-    testWidgets('in-clinic visits hide the Join Video Call button', (
+    testWidgets('in-clinic visits hide the Join Tele Call button', (
       tester,
     ) async {
       final appointment = AppointmentModel(
@@ -275,13 +273,13 @@ void main() {
       await _openSheet(tester, appointment);
 
       expect(
-        find.byKey(const ValueKey('join_video_call')),
+        find.byKey(const ValueKey('join_tele_call')),
         findsNothing,
       );
-      expect(find.text('Join Video Call'), findsNothing);
+      expect(find.text('Join Tele Call'), findsNothing);
     });
 
-    testWidgets('legacy rows without a type hide the Join Video Call button',
+    testWidgets('legacy rows without a type hide the Join Tele Call button',
         (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_BTN_4',
@@ -293,12 +291,12 @@ void main() {
       await _openSheet(tester, appointment);
 
       expect(
-        find.byKey(const ValueKey('join_video_call')),
+        find.byKey(const ValueKey('join_tele_call')),
         findsNothing,
       );
     });
 
-    testWidgets('a stored Meet link surfaces the shared room under the button',
+    testWidgets('stored Meet link is not shown below the Join button',
         (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_LINK_1',
@@ -306,24 +304,21 @@ void main() {
         appointmentDate: '2026-08-03',
         appointmentTime: '10:00 AM',
         consultationType: 'video',
-        // The OTHER side already started the meeting — this side must see
-        // and join the same room.
         meetLink: 'https://meet.google.com/abc-def-ghi',
       );
 
       await _openSheet(tester, appointment);
 
       expect(
-        find.byKey(const ValueKey('join_video_call')),
+        find.byKey(const ValueKey('join_tele_call')),
         findsOneWidget,
       );
-      // The shared room is surfaced so both sides see they're joining the
-      // same meeting.
-      expect(find.text('https://meet.google.com/abc-def-ghi'), findsOneWidget);
+      // The meeting link is NOT shown below the button (removed).
+      expect(find.text('https://meet.google.com/abc-def-ghi'), findsNothing);
     });
 
-    testWidgets('completed video consultations hide the Join Video Call '
-        'button and the Meet link', (tester) async {
+    testWidgets('completed video consultations hide the Join Tele Call '
+        'button', (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_DONE_1',
         patientName: 'Rahul Sharma',
@@ -341,15 +336,15 @@ void main() {
 
       // The consultation is over — no point joining a finished meeting.
       expect(
-        find.byKey(const ValueKey('join_video_call')),
+        find.byKey(const ValueKey('join_tele_call')),
         findsNothing,
       );
-      expect(find.text('Join Video Call'), findsNothing);
+      expect(find.text('Join Tele Call'), findsNothing);
       expect(find.text('https://meet.google.com/abc-def-ghi'), findsNothing);
     });
 
-    testWidgets('cancelled video consultations hide the Join Video Call '
-        'button and the Meet link', (tester) async {
+    testWidgets('cancelled video consultations hide the Join Tele Call '
+        'button', (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_CANCEL_1',
         patientName: 'Rahul Sharma',
@@ -366,10 +361,10 @@ void main() {
       );
 
       expect(
-        find.byKey(const ValueKey('join_video_call')),
+        find.byKey(const ValueKey('join_tele_call')),
         findsNothing,
       );
-      expect(find.text('Join Video Call'), findsNothing);
+      expect(find.text('Join Tele Call'), findsNothing);
       expect(find.text('https://meet.google.com/abc-def-ghi'), findsNothing);
     });
 
@@ -385,7 +380,7 @@ void main() {
       await _openSheet(tester, appointment);
 
       expect(
-        find.byKey(const ValueKey('join_video_call')),
+        find.byKey(const ValueKey('join_tele_call')),
         findsOneWidget,
       );
       expect(find.byIcon(Icons.link_rounded), findsNothing);
@@ -417,7 +412,7 @@ void main() {
         },
       );
 
-      await tester.tap(find.byKey(const ValueKey('join_video_call')));
+      await tester.tap(find.byKey(const ValueKey('join_tele_call')));
       await tester.pumpAndSettle();
 
       // The static room opened externally AND was persisted via the
@@ -433,12 +428,14 @@ void main() {
       final urlLauncher = _SheetFakeUrlLauncher();
       UrlLauncherPlatform.instance = urlLauncher;
 
+      // Use video type — tele consultations now open the phone dialer
+      // instead of Google Meet.
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_REUSE_1',
         patientName: 'Rahul Sharma',
         appointmentDate: '2026-08-03',
         appointmentTime: '10:00 AM',
-        consultationType: 'tele',
+        consultationType: 'video',
         meetLink: 'https://meet.google.com/abc-def-ghi',
       );
 
@@ -451,7 +448,7 @@ void main() {
         },
       );
 
-      await tester.tap(find.byKey(const ValueKey('join_video_call')));
+      await tester.tap(find.byKey(const ValueKey('join_tele_call')));
       await tester.pumpAndSettle();
 
       // The stored room opened directly (no Google sign-in — the fake

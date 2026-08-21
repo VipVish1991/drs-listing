@@ -24,6 +24,7 @@ class NotificationSettingsController extends GetxController {
   static const String eventRescheduledByDoctor =
       'appointment_rescheduled_by_doctor';
   static const String eventStatusChanged = 'appointment_status_changed';
+  static const String eventPaymentStatusChanged = 'payment_status_changed';
 
   /// Master-switch key: `all: false` disables EVERY event at once (checked
   /// first by the Edge Function). The per-event keys are preserved beneath
@@ -37,6 +38,7 @@ class NotificationSettingsController extends GetxController {
     eventRescheduled,
     eventRescheduledByDoctor,
     eventStatusChanged,
+    eventPaymentStatusChanged,
   ];
 
   /// All persisted keys — the master switch plus the three events. Used for

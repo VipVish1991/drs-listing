@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../config/theme.dart';
@@ -5,6 +7,7 @@ import '../models/appointment_model.dart';
 import '../models/payment_model.dart';
 import '../services/launch_service.dart';
 import '../services/meet_consult_service.dart';
+import '../utils/snackbar_helpers.dart';
 import 'appointment_info_card.dart';
 import 'prescription_gallery.dart';
 
@@ -410,94 +413,23 @@ class AppointmentDetailsSheet {
                   ),
                 ),
               ],
-              // ── Join Video Call (Google Meet SDK) ──
-              // Remote (video + tele/audio) consultations start the
-              // Meet-backed consultation: Google Sign-In → calendar event
-              // → the meeting link opens externally (browser / Meet app).
-              // When a link is already stored on the appointment, the
-              // button JOINS that same room instead of creating a new one
-              // — so the patient and the clinic always end up together.
-              // Hidden once the consultation is finished (Completed) or
-              // dropped (Cancelled) — no joining a meeting that's over.
+              // ── Join Tele Call (time-gated) ──
+              // Remote (video + tele/audio) consultations show a
+              // "Join Tele Call" button that is only enabled when the
+              // appointment date/time has been reached. Before that,
+              // a live countdown is displayed and tapping shows an
+              // info message. Google Meet video is disabled for tele
+              // consultations — the button opens the phone dialer
+              // instead. Hidden once the consultation is finished
+              // (Completed) or dropped (Cancelled).
               if (appointment.isRemoteConsultation &&
                   displayStatus != 'Cancelled' &&
                   displayStatus != 'Completed') ...[
                 const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: OutlinedButton.icon(
-                    key: const ValueKey('join_video_call'),
-                    onPressed: () async {
-                      final ctx = Get.context;
-                      if (ctx == null) return;
-                      final result = await MeetConsultService.joinConsultation(
-                        ctx,
-                        appointment,
-                      );
-                      // Persist a newly created link so the OTHER side
-                      // joins the same room on their next open. Safe to
-                      // call for a stored link too — it re-saves the same
-                      // value (non-destructive). Non-fatal on failure.
-                      if (result.success && result.meetingLink != null) {
-                        await onSaveMeetLink?.call(result.meetingLink!);
-                      }
-                    },
-                    icon: const Icon(Icons.videocam_rounded, size: 18),
-                    label: const Text(
-                      'Join Video Call',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.primary,
-                      side: BorderSide(color: AppColors.primary.withAlpha(70)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
+                _JoinTeleCallButton(
+                  appointment: appointment,
+                  onSaveMeetLink: onSaveMeetLink,
                 ),
-                // The shared room, surfaced so both sides see they're
-                // joining the same meeting.
-                if ((appointment.meetLink ?? '').isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withAlpha(10),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.link_rounded,
-                          size: 14,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            appointment.meetLink!,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
               ],
               // ── Fee / payment — rendered right beside the footer
               //    actions (e.g. Reschedule) so the patient and doctor see
@@ -787,6 +719,210 @@ class AppointmentPaymentCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Time-gated "Join Tele Call" button for remote consultations.
+///
+/// Displays a live countdown until the appointment's scheduled date+time,
+/// then enables the join action. Tapping before the scheduled time shows
+/// an info snackbar. For tele consultations, Google Meet video is
+/// disabled — the button opens the phone dialer instead.
+class _JoinTeleCallButton extends StatefulWidget {
+  final AppointmentModel appointment;
+  final Future<bool> Function(String link)? onSaveMeetLink;
+
+  const _JoinTeleCallButton({
+    required this.appointment,
+    this.onSaveMeetLink,
+  });
+
+  @override
+  State<_JoinTeleCallButton> createState() => _JoinTeleCallButtonState();
+}
+
+class _JoinTeleCallButtonState extends State<_JoinTeleCallButton> {
+  Timer? _timer;
+  Duration _remaining = Duration.zero;
+  bool _isTimeReached = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _computeRemaining();
+    if (!_isTimeReached) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        _computeRemaining();
+        if (_isTimeReached) _timer?.cancel();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  /// Parse the appointment's `yyyy-MM-dd` + `HH:MM AM/PM` into a
+  /// [DateTime] and compute the remaining duration.
+  void _computeRemaining() {
+    final dt = _parseAppointmentDateTime(widget.appointment);
+    if (dt == null) {
+      if (mounted) {
+        setState(() {
+          _isTimeReached = true;
+          _remaining = Duration.zero;
+        });
+      }
+      return;
+    }
+    final now = DateTime.now();
+    final diff = dt.difference(now);
+    if (diff.isNegative || diff == Duration.zero) {
+      if (mounted) {
+        setState(() {
+          _isTimeReached = true;
+          _remaining = Duration.zero;
+        });
+      }
+    } else {
+      if (mounted) {
+        setState(() {
+          _remaining = diff;
+        });
+      }
+    }
+  }
+
+  /// Parse `yyyy-MM-dd` + `HH:MM AM/PM` → [DateTime].
+  static DateTime? _parseAppointmentDateTime(AppointmentModel a) {
+    final dateStr = a.appointmentDate;
+    final timeStr = a.appointmentTime;
+    if (dateStr == null || dateStr.isEmpty) return null;
+    try {
+      final parts = dateStr.split('-');
+      final year = int.parse(parts[0]);
+      final month = int.parse(parts[1]);
+      final day = int.parse(parts[2]);
+      var hour = 0;
+      var minute = 0;
+      if (timeStr != null && timeStr.isNotEmpty) {
+        final cleaned = timeStr.trim().toUpperCase();
+        final isPm = cleaned.endsWith('PM');
+        final timeOnly = cleaned
+            .replaceAll('AM', '')
+            .replaceAll('PM', '')
+            .trim();
+        final tParts = timeOnly.split(':');
+        hour = int.parse(tParts[0]);
+        minute = tParts.length > 1 ? int.parse(tParts[1]) : 0;
+        if (isPm && hour != 12) hour += 12;
+        if (!isPm && hour == 12) hour = 0;
+      }
+      return DateTime(year, month, day, hour, minute);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _countdownLabel() {
+    final h = _remaining.inHours;
+    final m = _remaining.inMinutes.remainder(60);
+    final s = _remaining.inSeconds.remainder(60);
+    if (h > 0) return 'Join in ${h}h ${m}m ${s}s';
+    if (m > 0) return 'Join in ${m}m ${s}s';
+    return 'Join in ${s}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final a = widget.appointment;
+    final isTele = a.consultationType == 'tele';
+
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: OutlinedButton.icon(
+        key: const ValueKey('join_tele_call'),
+        onPressed: _isTimeReached
+            ? () async {
+                if (isTele) {
+                  // Tele: open phone dialer (Google Meet video disabled).
+                  final phone = a.callNumber ?? a.patientPhone;
+                  if (phone != null && phone.isNotEmpty) {
+                    LaunchService.phone(phone);
+                  } else {
+                    showInfoSnackbar(
+                      'No phone number available for this consultation.',
+                    );
+                  }
+                } else {
+                  // Video: keep the Google Meet flow.
+                  final ctx = Get.context;
+                  if (ctx == null) return;
+                  final result =
+                      await _joinVideoConsultation(ctx, a);
+                  if (result != null &&
+                      result['success'] == true &&
+                      result['link'] != null) {
+                    await widget.onSaveMeetLink
+                        ?.call(result['link'] as String);
+                  }
+                }
+              }
+            : () {
+                showInfoSnackbar(
+                  'Consultation starts at ${a.appointmentTime ?? ''} '
+                  'on ${a.displayDate ?? ''}.',
+                );
+              },
+        icon: Icon(
+          isTele ? Icons.phone_rounded : Icons.videocam_rounded,
+          size: 18,
+        ),
+        label: Text(
+          _isTimeReached ? 'Join Tele Call' : _countdownLabel(),
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor:
+              _isTimeReached ? AppColors.primary : AppColors.textCaption,
+          side: BorderSide(
+            color: (_isTimeReached
+                    ? AppColors.primary
+                    : AppColors.textCaption)
+                .withAlpha(70),
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Video consultation join — lazily loads MeetConsultService so the
+/// tele path doesn't pull in the Google Meet SDK.
+Future<Map<String, dynamic>?> _joinVideoConsultation(
+  BuildContext context,
+  AppointmentModel appointment,
+) async {
+  try {
+    final meetMod = await MeetConsultService.joinConsultation(
+      context,
+      appointment,
+    );
+    return {
+      'success': meetMod.success,
+      'link': meetMod.meetingLink,
+    };
+  } catch (_) {
+    return null;
   }
 }
 

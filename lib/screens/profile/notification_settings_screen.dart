@@ -273,6 +273,34 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                                     : null,
                               );
                             }),
+                            const Divider(
+                              height: 1,
+                              indent: 68,
+                              color: Color(0xFFECEEF2),
+                            ),
+                            Obx(() {
+                              final paymentChanged = _controller.prefs[
+                                NotificationSettingsController
+                                    .eventPaymentStatusChanged
+                              ] ??
+                              true;
+                              return _buildToggleTile(
+                                icon: Icons.payment_rounded,
+                                color: AppColors.success,
+                                title: 'Payment Updates',
+                                subtitle:
+                                    'When your payment is marked as paid '
+                                    'or refunded',
+                                value: allEnabled ? paymentChanged : false,
+                                onChanged: allEnabled
+                                    ? (v) => _controller.setPref(
+                                        NotificationSettingsController
+                                            .eventPaymentStatusChanged,
+                                        v,
+                                      )
+                                    : null,
+                              );
+                            }),
                           ],
                         );
                       }),
