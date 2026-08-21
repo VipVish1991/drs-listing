@@ -6,6 +6,7 @@ import '../../config/theme.dart';
 import '../../controllers/doctor_controller.dart';
 import '../../models/appointment_model.dart';
 import '../../models/payment_model.dart';
+import '../../services/local_storage_service.dart';
 import '../../services/quantupi_payment_service.dart';
 import '../../routes/app_routes.dart';
 import '../../utils/appointment_dialogs.dart';
@@ -39,6 +40,9 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
   /// Current search query (raw text as typed).
   String _searchQuery = '';
 
+  /// Consultation-type filter: 0 = All, 1 = Online, 2 = Offline.
+  late int _consultationFilter;
+
   final TextEditingController _searchController = TextEditingController();
 
   /// Session-level memory of an online refund the UPI app CONFIRMED but
@@ -52,6 +56,7 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
   @override
   void initState() {
     super.initState();
+    _consultationFilter = LocalStorageService().getAppointmentFilter();
     final now = DateTime.now();
     _selectedDate =
         '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
@@ -676,6 +681,9 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
                   .animate()
                   .fadeIn(duration: 350.ms, delay: 120.ms)
                   .slideY(begin: -0.08, end: 0, duration: 350.ms),
+            // ── Online / Offline filter chips ──
+            if (!_isSearching) _buildConsultationFilter(),
+
             Expanded(child: _buildAppointmentsList()),
           ],
         ),
@@ -792,10 +800,74 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
   }
 
   List<AppointmentModel> _visibleAppointments() {
+    List<AppointmentModel> pool;
     if (!_isSearching) {
-      return _controller.getAppointmentsForDate(_selectedDate);
+      pool = _controller.getAppointmentsForDate(_selectedDate);
+    } else {
+      pool = filterAppointmentsForSearch(
+        _controller.appointments,
+        _searchQuery,
+      );
     }
-    return filterAppointmentsForSearch(_controller.appointments, _searchQuery);
+    return _applyConsultationFilter(pool);
+  }
+
+  /// Filter [list] by the selected Online / Offline / All chip.
+  List<AppointmentModel> _applyConsultationFilter(List<AppointmentModel> list) {
+    if (_consultationFilter == 0) return list; // All
+    final wantOnline = _consultationFilter == 1;
+    return list.where((a) {
+      final isOnline =
+          a.consultationType == 'tele' || a.consultationType == 'video';
+      return wantOnline ? isOnline : !isOnline;
+    }).toList();
+  }
+
+  /// Select a consultation filter and persist the choice.
+  VoidCallback _selectFilter(int index) {
+    return () {
+      setState(() => _consultationFilter = index);
+      LocalStorageService().setAppointmentFilter(index);
+    };
+  }
+
+  /// Compact row of three filter chips: All · Online · Offline.
+  /// Each chip shows a count badge of matching appointments for the
+  /// currently selected date.
+  Widget _buildConsultationFilter() {
+    final dayAppts = _controller.getAppointmentsForDate(_selectedDate);
+    final allCount = dayAppts.length;
+    final onlineCount = dayAppts.where((a) => a.isRemoteConsultation).length;
+    final offlineCount = allCount - onlineCount;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Row(
+        children: [
+          _DocFilterChip(
+            label: 'All',
+            count: allCount,
+            selected: _consultationFilter == 0,
+            onTap: _selectFilter(0),
+          ),
+          const SizedBox(width: 8),
+          _DocFilterChip(
+            label: 'Online',
+            icon: Icons.videocam_rounded,
+            count: onlineCount,
+            selected: _consultationFilter == 1,
+            onTap: _selectFilter(1),
+          ),
+          const SizedBox(width: 8),
+          _DocFilterChip(
+            label: 'Offline',
+            icon: Icons.storefront_rounded,
+            count: offlineCount,
+            selected: _consultationFilter == 2,
+            onTap: _selectFilter(2),
+          ),
+        ],
+      ),
+    ).animate().fadeIn(duration: 300.ms, delay: 180.ms);
   }
 
   void _showAppointmentDetails(AppointmentModel a) {
@@ -853,9 +925,15 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
 
       final dayAppts = _visibleAppointments();
 
+      // Key changes on filter/date/search switch → triggers
+      // AnimatedSwitcher crossfade.
+      final filterKey = ValueKey(
+        '${_consultationFilter}_${_selectedDate}_${_isSearching}_$_searchQuery',
+      );
+
       if (dayAppts.isEmpty) {
         final isSearchEmpty = _isSearching && _searchQuery.isNotEmpty;
-        return Center(
+        final empty = Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -901,11 +979,23 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
             .animate()
             .fadeIn(duration: 300.ms, curve: Curves.easeOut)
             .slideY(begin: 0.08, end: 0, duration: 300.ms, curve: Curves.easeOut);
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child: KeyedSubtree(key: filterKey, child: empty),
+        );
       }
 
-      return ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        itemCount: dayAppts.length,
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        child: KeyedSubtree(
+          key: filterKey,
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            itemCount: dayAppts.length,
         itemBuilder: (context, index) {
           final a = dayAppts[index];
           final status = _statusLabel(a.status);
@@ -971,6 +1061,8 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
             );
           });
         },
+      ),
+      ),
       );
     });
   }
@@ -1493,6 +1585,91 @@ class _RefundDetailRow extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Small rounded filter chip used by the consultation-type tabs.
+class _DocFilterChip extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _DocFilterChip({
+    required this.label,
+    this.icon,
+    this.count = 0,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.primary.withAlpha(20)
+              : AppColors.bgCard,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected
+                ? AppColors.primary.withAlpha(80)
+                : AppColors.textCaption.withAlpha(40),
+            width: 1.2,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(
+                icon!,
+                size: 13,
+                color: selected
+                    ? AppColors.primary
+                    : AppColors.textCaption.withAlpha(160),
+              ),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected
+                    ? AppColors.primary
+                    : AppColors.textCaption.withAlpha(180),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: selected
+                    ? AppColors.primary.withAlpha(30)
+                    : AppColors.textCaption.withAlpha(20),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: selected
+                      ? AppColors.primary
+                      : AppColors.textCaption.withAlpha(160),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

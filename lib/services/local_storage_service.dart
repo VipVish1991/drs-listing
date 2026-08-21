@@ -344,6 +344,19 @@ class LocalStorageService {
     return null;
   }
 
+  // ── Appointment consultation-type filter (All / Online / Offline) ──
+  // Remembers the last chip the patient or doctor selected so the same
+  // filter is restored on next open. Stored as an int (0 = All, 1 =
+  // Online, 2 = Offline); a missing / invalid value defaults to All.
+
+  Future<void> setAppointmentFilter(int filter) async {
+    await _prefs?.setInt('appointment_consultation_filter', filter);
+  }
+
+  int getAppointmentFilter() {
+    return _prefs?.getInt('appointment_consultation_filter') ?? 0;
+  }
+
   // ── Clear all ──
   Future<void> clearAll() async {
     await _prefs?.clear();

@@ -1060,7 +1060,7 @@ function renderPage(
 
   const intro = missingDoctor
     ? "This booking link is incomplete. Please rescan the QR code from the doctor profile."
-    : "Fill in your details below to book an appointment for today. The clinic will confirm your booking shortly.";
+    : "Book an in-clinic appointment below. For video or tele consultations, download the app.";
 
   const errorHtml = error ? `<div class="status info">${escapeHtml(error)}</div>` : "";
 
@@ -1076,15 +1076,50 @@ function renderPage(
       <label for="description">Describe your problem (optional)</label>
       <textarea id="description" name="description" placeholder="Briefly describe your symptoms or reason for the visit"></textarea>
 
-      <button type="submit" id="submitBtn">Book Appointment</button>
+      <div id="slotSection" style="display:none;">
+        <label>Appointment Date</label>
+        <select id="dateSelect" style="width:100%;padding:12px 14px;border:1.5px solid #E5E7EB;border-radius:12px;font-size:15px;font-family:inherit;background:#FAFAF9;outline:none;">
+          <option value="">Loading dates...</option>
+        </select>
+
+        <label>Time Slot</label>
+        <select id="timeSelect" style="width:100%;padding:12px 14px;border:1.5px solid #E5E7EB;border-radius:12px;font-size:15px;font-family:inherit;background:#FAFAF9;outline:none;" disabled>
+          <option value="">Select a date first</option>
+        </select>
+      </div>
+
+      <button type="submit" id="submitBtn">Book In-Clinic Appointment</button>
     </form>
     <div id="status" class="status"></div>`;
+
+  // App download section for Video / Tele consultations
+  const appDownloadHtml = missingDoctor
+    ? ""
+    : `<div id="appDownloadSection" style="display:none;">
+      <div class="divider"></div>
+      <h3 class="section-title">Video &amp; Tele Consultation</h3>
+      <p class="section-desc">For video or tele consultations, please download the DrsListing app.</p>
+      <div class="store-buttons">
+        <a href="https://play.google.com/store/apps/details?id=com.drslisting.app" target="_blank" rel="noopener" class="store-btn android">
+          <svg width="20" height="22" viewBox="0 0 20 22" fill="none"><path d="M1 1l9.5 10L1 21V1z" fill="#fff"/><path d="M14.5 8.5L11 11l3.5 2.5 3-2-3-3z" fill="#fff"/><path d="M1 1l13.5 7.5-4 3.5L1 1z" fill="#4ECDC4"/><path d="M1 21l9.5-11 4 3.5L1 21z" fill="#4ECDC4"/></svg>
+          <span>GET IT ON<br><b>Google Play</b></span>
+        </a>
+        <a href="https://apps.apple.com/app/drslisting/id1234567890" target="_blank" rel="noopener" class="store-btn ios">
+          <svg width="18" height="22" viewBox="0 0 18 22" fill="none"><path d="M14.5 11.5c0-2.5 2-3.7 2.1-3.8-1.1-1.7-2.9-1.9-3.5-2-1.5-.2-2.9.9-3.7.9-.8 0-2-.9-3.2-.8-1.6.1-3.1.9-3.9 2.4-1.7 2.9-.4 7.3 1.2 9.6.8 1.1 1.8 2.4 3.1 2.3 1.2-.1 1.7-.8 3.1-.8 1.5 0 2 .8 3.2.8 1.3 0 2.2-1.2 3-2.3.9-1.3 1.3-2.5 1.3-2.6-.1-.1-2.5-1-2.5-3.8zM12.3 3.9c.7-.8 1.1-2 1-3.1-1 0-2.2.7-2.9 1.5-.7.7-1.2 1.9-1 3.1 1.1.1 2.2-.6 2.9-1.5z" fill="#fff"/></svg>
+          <span>Download on the<br><b>App Store</b></span>
+        </a>
+      </div>
+      <p class="section-note">Get AI health assistant, video consultations, appointment management and more.</p>
+    </div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0E7C66">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>${title}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1156,6 +1191,27 @@ function renderPage(
     .status.err { display: block; background: #FEF2F2; color: #991B1B; }
     .status.info { display: block; background: #FFFBEB; color: #92400E; }
     .foot { margin-top: 18px; font-size: 11.5px; color: #9CA3AF; text-align: center; }
+    .divider { height: 1px; background: #E5E7EB; margin: 24px 0; }
+    .section-title { font-size: 16px; font-weight: 700; color: #1F2933; margin-bottom: 6px; }
+    .section-desc { font-size: 13px; color: #6B7280; line-height: 1.5; margin-bottom: 16px; }
+    .store-buttons { display: flex; gap: 12px; margin-bottom: 12px; }
+    .store-btn {
+      flex: 1; display: flex; align-items: center; gap: 8px;
+      padding: 12px 14px; border-radius: 12px;
+      text-decoration: none; font-size: 11px; color: #fff;
+      line-height: 1.3; transition: transform 0.15s;
+    }
+    .store-btn:active { transform: scale(0.97); }
+    .store-btn.android { background: #1F2933; }
+    .store-btn.ios { background: #1F2933; }
+    .store-btn b { font-size: 14px; }
+    .section-note { font-size: 11.5px; color: #9CA3AF; text-align: center; line-height: 1.4; }
+    .loading-spinner {
+      display: inline-block; width: 18px; height: 18px;
+      border: 2.5px solid rgba(255,255,255,0.3); border-top-color: #fff;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -1165,59 +1221,114 @@ function renderPage(
     <p class="intro">${intro}</p>
 
     ${formHtml}
+    ${appDownloadHtml}
     ${errorHtml}
 
-    <div class="foot">DrsListing · Appointment booked for today</div>
+    <div class="foot">DrsListing \u00b7 In-Clinic Appointment</div>
   </div>
 
   <script>
-    const form = document.getElementById('bookingForm');
-    if (form) {
-      // The shared token from the QR URL is replayed on submit so the
-      // POST can prove it came from a valid scan.
-      const token = new URL(window.location.href).searchParams.get('token') || '';
+    (async function() {
+      const params = new URL(window.location.href).searchParams;
+      const doctorId = params.get('doctor') || '';
+      const token = params.get('token') || '';
+      if (!doctorId || !token) return;
+      const baseUrl = window.location.href.split('?')[0];
+      try {
+        const res = await fetch(baseUrl + '?doctor=' + encodeURIComponent(doctorId) + '&token=' + token + '&action=slots');
+        const data = await res.json();
+        if (!data.ok || !data.slots) return;
+        const slots = data.slots;
+        const clinicSlots = slots.filter(s => s.schedule_type === 'clinic' && s.is_enabled);
+        const videoSlots = slots.filter(s => s.schedule_type === 'video' && s.is_enabled);
+        const teleSlots = slots.filter(s => s.schedule_type === 'tele' && s.is_enabled);
+        if (videoSlots.length > 0 || teleSlots.length > 0) {
+          const section = document.getElementById('appDownloadSection');
+          if (section) section.style.display = 'block';
+        }
+        if (clinicSlots.length > 0) {
+          const slotSection = document.getElementById('slotSection');
+          const dateSelect = document.getElementById('dateSelect');
+          const timeSelect = document.getElementById('timeSelect');
+          if (slotSection) slotSection.style.display = 'block';
+          const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+          const now = new Date();
+          const dates = [];
+          for (let i = 0; i < 7; i++) {
+            const d = new Date(now);
+            d.setDate(now.getDate() + i);
+            const weekday = days[d.getDay()];
+            const dateStr = d.toISOString().split('T')[0];
+            if (clinicSlots.some(s => s.day_of_week === weekday)) {
+              dates.push({ date: dateStr, weekday: weekday, label: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) });
+            }
+          }
+          if (dateSelect) {
+            dateSelect.innerHTML = dates.length
+              ? dates.map(d => '<option value="' + d.date + '|' + d.weekday + '">' + d.label + '</option>').join('')
+              : '<option value="">No clinic slots available</option>';
+            dateSelect.onchange = function() {
+              if (!timeSelect) return;
+              const val = this.value;
+              if (!val) { timeSelect.innerHTML = '<option value="">Select a date first</option>'; timeSelect.disabled = true; return; }
+              const weekday = val.split('|')[1];
+              const available = clinicSlots.filter(s => s.day_of_week === weekday);
+              timeSelect.innerHTML = available.length
+                ? available.map(s => '<option value="' + s.time_slot + '">' + s.time_slot + (s.fee ? ' - \u20b9' + s.fee : '') + '</option>').join('')
+                : '<option value="">No slots on this day</option>';
+              timeSelect.disabled = !available.length;
+            };
+            if (dateSelect.value) dateSelect.onchange();
+          }
+        }
+      } catch (e) { console.error('Failed to load slots:', e); }
+      const form = document.getElementById('bookingForm');
+      if (!form) return;
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const status = document.getElementById('status');
         const btn = document.getElementById('submitBtn');
         btn.disabled = true;
-        btn.textContent = 'Booking...';
-
+        btn.innerHTML = '<span class="loading-spinner"></span> Booking...';
+        const dateSelect = document.getElementById('dateSelect');
+        const timeSelect = document.getElementById('timeSelect');
+        const dateVal = dateSelect ? dateSelect.value.split('|')[0] : '';
+        const timeVal = timeSelect ? timeSelect.value : '';
         const body = {
           name: document.getElementById('name').value,
           mobile: document.getElementById('mobile').value,
           description: document.getElementById('description').value,
+          type: 'clinic',
         };
-
+        if (dateVal) body.date = dateVal;
+        if (timeVal) body.time = timeVal;
         try {
-          const res = await fetch(window.location.href, {
+          const res = await fetch(baseUrl + '?doctor=' + encodeURIComponent(doctorId), {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-booking-token': token,
-            },
+            headers: { 'Content-Type': 'application/json', 'x-booking-token': token },
             body: JSON.stringify(body),
           });
           const data = await res.json();
           if (data.ok) {
             status.className = 'status ok';
-            status.innerHTML = '🎉 <b>Appointment booked!</b><br>Reference: <b>' +
-              data.appointmentId + '</b><br>Date: <b>' + data.date + '</b> (status: Pending).<br>' +
-              'The clinic will confirm shortly.';
+            status.innerHTML = '\u{1F389} <b>Appointment booked!</b><br>Reference: <b>' +
+              data.appointmentId + '</b><br>Date: <b>' + data.date + '</b>' +
+              (data.time ? ' at <b>' + data.time + '</b>' : '') +
+              '<br>The clinic will confirm shortly.';
             form.reset();
           } else {
             status.className = 'status err';
-            status.textContent = '❌ ' + (data.error || 'Something went wrong. Please try again.');
+            status.textContent = '\u274C ' + (data.error || 'Something went wrong. Please try again.');
           }
         } catch (err) {
           status.className = 'status err';
-          status.textContent = '❌ Network error. Please check your connection and try again.';
+          status.textContent = '\u274C Network error. Please check your connection and try again.';
         } finally {
           btn.disabled = false;
-          btn.textContent = 'Book Appointment';
+          btn.textContent = 'Book In-Clinic Appointment';
         }
       });
-    }
+    })();
   </script>
 </body>
 </html>`;

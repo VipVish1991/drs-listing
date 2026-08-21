@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/constants.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/notification_center_controller.dart';
@@ -216,6 +217,50 @@ class NotificationService {
 
   // ── Device-token persistence ─────────────────────────────────────
 
+  /// Clear the cached FCM token so the next [syncTokenForCurrentUser]
+  /// call forces a fresh fetch from Firebase. Called on logout to
+  /// prevent a stale token from being silently reused for the next
+  /// user on a shared device.
+  void clearCachedToken() {
+    _token = null;
+    _fetchingToken = false;
+  }
+
+  /// Full logout cleanup: invalidate the FCM token on Firebase's side,
+  /// cancel all pending local notifications, and clear the in-memory
+  /// cache. This is the nuclear option — the old token is dead even if
+  /// the DB cleanup fails, so no stale pushes leak to the next user.
+  /// The next login triggers a fresh [getToken] + [syncTokenForCurrentUser].
+  Future<void> logoutCleanup() async {
+    // 1. Delete the token from Firebase entirely — invalidates it
+    //    server-side so even a missed DB cleanup can't deliver pushes.
+    if (_firebaseReady) {
+      try {
+        await FirebaseMessaging.instance.deleteToken();
+        debugPrint(
+          '✅ [NotificationService] FCM token deleted from Firebase '
+          '(logout)',
+        );
+      } catch (e) {
+        // Non-fatal: the DB cleanup and clearCachedToken still run.
+        debugPrint(
+          '⚠️ [NotificationService] deleteToken failed (non-fatal): $e',
+        );
+      }
+    }
+    // 2. Cancel all pending local notifications so stale appointment
+    //    alerts from the previous user don't appear on the login screen.
+    if (_localNotifReady) {
+      try {
+        await _localNotifications.cancelAll();
+      } catch (_) {
+        // Non-fatal: cosmetic only.
+      }
+    }
+    // 3. Clear the in-memory cache so the next login forces a fresh fetch.
+    clearCachedToken();
+  }
+
   /// Register the current device token on [user]'s row (multi-device).
   /// Fire-and-forget: token sync must never block login/registration.
   ///
@@ -250,7 +295,7 @@ class NotificationService {
   /// don't leak to the next user on the shared device). Stale tokens are
   /// pruned server-side when FCM reports them unregistered.
   Future<void> removeTokenForUser(UserModel user) async {
-    if (user.id == null || !_firebaseReady || _token == null) return;
+    if (user.id == null || !_firebaseReady) return;
     // Doctor logout → keep this device registered so booking pushes still
     // reach the clinic even while a patient account is logged in here.
     if (user.isDoctor) {
@@ -260,10 +305,60 @@ class NotificationService {
       );
       return;
     }
+    // If the token isn't cached (FCM init failed at startup), try a
+    // fresh fetch before giving up — otherwise the stale token stays
+    // in the DB and the next login inherits it.
+    if (_token == null) {
+      try {
+        _token = await FirebaseMessaging.instance.getToken();
+      } catch (_) {
+        // Still no token — nothing to remove server-side.
+        debugPrint(
+          '⚠️ [NotificationService] removeTokenForUser: no FCM token '
+          'available — DB token may be stale',
+        );
+        return;
+      }
+    }
+    if (_token == null) return;
     try {
       await _supabase.removeDeviceToken(user.id!, _token!);
     } catch (e) {
       debugPrint('⚠️ [NotificationService] token removal failed: $e');
+    }
+  }
+
+  /// Remove this device's FCM token from every OTHER user's row.
+  /// Called after logout so a shared device doesn't carry stale tokens
+  /// for accounts that are no longer active here. Best-effort: a failure
+  /// on one row must not block cleanup of the rest.
+  ///
+  /// The logged-in user's own token is handled separately by
+  /// [removeTokenForUser] (or kept for doctors).
+  Future<void> cleanupStaleTokensForOtherUsers(String currentUserId) async {
+    if (_token == null || !_firebaseReady) return;
+    try {
+      final client = Supabase.instance.client;
+      // Fetch all users whose device_tokens array contains our token
+      // but whose id is NOT the current user.
+      final rows = await client
+          .from('users')
+          .select('id')
+          .neq('id', currentUserId)
+          .contains('device_tokens', '[{"token":"$_token"}]');
+      for (final row in rows) {
+        final otherUserId = row['id'] as String?;
+        if (otherUserId == null) continue;
+        try {
+          await _supabase.removeDeviceToken(otherUserId, _token!);
+        } catch (_) {
+          // Non-fatal: best-effort cleanup per row.
+        }
+      }
+    } catch (e) {
+      debugPrint(
+        '⚠️ [NotificationService] cleanupStaleTokensForOtherUsers failed: $e',
+      );
     }
   }
 

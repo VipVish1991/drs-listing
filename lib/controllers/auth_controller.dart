@@ -1065,8 +1065,20 @@ class AuthController extends GetxController {
     // clinic keeps receiving booking pushes even when a patient logs into
     // the same shared phone.
     final user = currentUser.value;
+    final userId = user?.id;
     if (user != null) {
       await NotificationService.instance.removeTokenForUser(user);
+    }
+    // Full logout cleanup: delete the FCM token from Firebase (invalidates
+    // it server-side), cancel stale local notifications, and clear the
+    // in-memory cache so the next login forces a fresh token fetch.
+    await NotificationService.instance.logoutCleanup();
+    // Remove this device's token from any OTHER user's row (stale
+    // tokens from a previous doctor session, etc.). Best-effort.
+    if (userId != null) {
+      unawaited(
+        NotificationService.instance.cleanupStaleTokensForOtherUsers(userId),
+      );
     }
     await _authService.logout();
     currentUser.value = null;

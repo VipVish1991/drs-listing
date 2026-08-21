@@ -54,7 +54,7 @@ AS $$
 DECLARE
     v_doctor_place_id TEXT;
     v_active_id       TEXT;
-    v_today           TEXT;
+    v_today           DATE;
     v_now_minutes     INT;
 BEGIN
     IF NEW.user_id IS NULL THEN
@@ -70,9 +70,9 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    -- Pre-compute "today" (as YYYY-MM-DD) and current minutes-since-midnight
+    -- Pre-compute today as DATE and current minutes-since-midnight
     -- in UTC so the per-row comparison stays fast and timezone-consistent.
-    v_today       := to_char(now(), 'YYYY-MM-DD');
+    v_today       := CURRENT_DATE;
     v_now_minutes := extract(hour FROM now())::int * 60
                    + extract(minute FROM now())::int;
 
