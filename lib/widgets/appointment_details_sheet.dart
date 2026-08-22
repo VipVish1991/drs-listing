@@ -429,6 +429,7 @@ class AppointmentDetailsSheet {
                 _JoinTeleCallButton(
                   appointment: appointment,
                   onSaveMeetLink: onSaveMeetLink,
+                  phone: phone,
                 ),
               ],
               // ── Fee / payment — rendered right beside the footer
@@ -732,9 +733,14 @@ class _JoinTeleCallButton extends StatefulWidget {
   final AppointmentModel appointment;
   final Future<bool> Function(String link)? onSaveMeetLink;
 
+  /// Resolved phone number from the parent sheet — patient's number
+  /// on the doctor side, doctor's number on the patient side.
+  final String? phone;
+
   const _JoinTeleCallButton({
     required this.appointment,
     this.onSaveMeetLink,
+    this.phone,
   });
 
   @override
@@ -849,9 +855,14 @@ class _JoinTeleCallButtonState extends State<_JoinTeleCallButton> {
             ? () async {
                 if (isTele) {
                   // Tele: open phone dialer (Google Meet video disabled).
-                  final phone = a.callNumber ?? a.patientPhone;
-                  if (phone != null && phone.isNotEmpty) {
-                    LaunchService.phone(phone);
+                  // Use the resolved phone from the parent sheet so the
+                  // doctor side calls the patient (not the doctor's own
+                  // number stored as callNumber).
+                  final dialable = widget.phone ??
+                      a.callNumber ??
+                      a.patientPhone;
+                  if (dialable != null && dialable.isNotEmpty) {
+                    LaunchService.phone(dialable);
                   } else {
                     showInfoSnackbar(
                       'No phone number available for this consultation.',

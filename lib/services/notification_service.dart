@@ -281,19 +281,18 @@ class NotificationService {
     }
   }
 
-  /// Remove this device's token from [user]'s row (logout) so a shared
+  /// Clear this device's token from [user]'s row (logout) so a shared
   /// device never pushes the previous user's notifications — with ONE
   /// deliberate exception: **doctor accounts keep their registration**.
   ///
   /// A doctor's phone is routinely shared with patients (a receptionist
   /// logs into the same device to book appointments). Removing the doctor's
   /// token on logout would silently silence every "New Appointment
-  /// Request"/cancellation push for the clinic. The device_tokens JSONB
-  /// array supports one token on many rows, so the token stays on the
-  /// doctor's row (booking alerts keep arriving on this phone) while the
-  /// patient's row is still cleaned up (their status-change notifications
-  /// don't leak to the next user on the shared device). Stale tokens are
-  /// pruned server-side when FCM reports them unregistered.
+  /// Request"/cancellation push for the clinic. Since device_tokens now
+  /// holds only a single token, the token stays on the doctor's row
+  /// (booking alerts keep arriving) while the patient's row is cleared.
+  /// Stale tokens are pruned server-side when FCM reports them
+  /// unregistered.
   Future<void> removeTokenForUser(UserModel user) async {
     if (user.id == null || !_firebaseReady) return;
     // Doctor logout → keep this device registered so booking pushes still

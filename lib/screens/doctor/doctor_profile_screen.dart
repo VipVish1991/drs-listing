@@ -11,6 +11,7 @@ import '../../models/doctor_model.dart';
 import '../../models/unavailable_range.dart';
 import '../../services/launch_service.dart';
 import '../../services/share_service.dart';
+import '../../routes/app_routes.dart';
 import '../../services/supabase_service.dart';
 import '../../utils/snackbar_helpers.dart';
 import '../../widgets/photo_gallery_card.dart';
@@ -45,6 +46,8 @@ class DoctorProfileScreen extends StatelessWidget {
                 _buildUpiCard(controller),
                 const SizedBox(height: 24),
                 _buildAvailabilityCard(controller),
+                const SizedBox(height: 24),
+                _buildNotificationSettingsCard(),
                 const SizedBox(height: 24),
                 _buildBottomActions(controller),
                 const SizedBox(height: 24),
@@ -516,6 +519,93 @@ class DoctorProfileScreen extends StatelessWidget {
     ).animate().fadeIn(duration: 400.ms, delay: 220.ms);
   }
 
+  /// Notification settings — navigates to the shared notification
+  /// preferences screen so the doctor can enable/disable push alerts.
+  Widget _buildNotificationSettingsCard() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.bgCard,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(6),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => Get.toNamed(AppRoutes.notificationSettings),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  Container(
+                    width: 4,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withAlpha(20),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.notifications_active_rounded,
+                      size: 18,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Notification Settings',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textHeading,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Manage push alert preferences',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.textCaption,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    size: 15,
+                    color: AppColors.textCaption.withAlpha(150),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ).animate().fadeIn(duration: 400.ms, delay: 230.ms);
+  }
+
   /// Bottom action row with three buttons: Directions, Share, Book Appointment.
   Widget _buildBottomActions(DoctorController controller) {
     return Obx(() {
@@ -798,35 +888,7 @@ class DoctorProfileScreen extends StatelessWidget {
         child: TextButton.icon(
           onPressed: () {
             Get.dialog(
-              AlertDialog(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                title: const Text('Logout'),
-                content: const Text('Are you sure you want to logout?'),
-                actions: [
-                  TextButton(
-                    onPressed: () => Get.back(),
-                    child: Text(
-                      'Cancel',
-                      style: TextStyle(color: AppColors.textCaption),
-                    ),
-                  ),
-                  ElevatedButton(
-                    onPressed: () {
-                      Get.back();
-                      authCtrl.logout();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.error,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Logout'),
-                  ),
-                ],
-              ),
+              _LogoutDialog(authCtrl: authCtrl),
             );
           },
           icon: const Icon(Icons.logout_rounded, size: 18),
@@ -1955,6 +2017,64 @@ class _UpiEditDialogState extends State<_UpiEditDialog> {
                   ),
                 )
               : const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Logout confirmation dialog with a loading spinner on the button while
+/// the auth controller signs the user out.
+class _LogoutDialog extends StatefulWidget {
+  final AuthController authCtrl;
+  const _LogoutDialog({required this.authCtrl});
+
+  @override
+  State<_LogoutDialog> createState() => _LogoutDialogState();
+}
+
+class _LogoutDialogState extends State<_LogoutDialog> {
+  bool _isLoggingOut = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      title: const Text('Logout'),
+      content: const Text('Are you sure you want to logout?'),
+      actions: [
+        TextButton(
+          onPressed: _isLoggingOut ? null : () => Get.back(),
+          child: Text(
+            'Cancel',
+            style: TextStyle(color: AppColors.textCaption),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: _isLoggingOut
+              ? null
+              : () async {
+                  setState(() => _isLoggingOut = true);
+                  await widget.authCtrl.logout();
+                },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.error,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: _isLoggingOut
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Text('Logout'),
         ),
       ],
     );

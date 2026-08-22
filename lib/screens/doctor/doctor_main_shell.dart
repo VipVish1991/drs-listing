@@ -6,7 +6,10 @@ import '../../config/theme.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/doctor_controller.dart';
 import '../../controllers/notification_center_controller.dart';
+import '../../models/payment_model.dart';
 import '../../routes/app_routes.dart';
+import '../../services/supabase_service.dart';
+import '../profile/payment_history_screen.dart';
 import 'doctor_dashboard_screen.dart';
 import 'doctor_appointments_screen.dart';
 import 'doctor_availability_screen.dart';
@@ -16,7 +19,8 @@ import 'doctor_profile_screen.dart';
 /// Tab 0: Dashboard (Home)
 /// Tab 1: Appointments
 /// Tab 2: Slots
-/// Tab 3: Profile
+/// Tab 3: Payment History
+/// Tab 4: Profile
 class DoctorMainShell extends StatefulWidget {
   const DoctorMainShell({super.key});
 
@@ -80,6 +84,7 @@ class _DoctorMainShellState extends State<DoctorMainShell>
       const DoctorDashboardScreen(),
       const DoctorAppointmentsScreen(),
       _SlotsTabWrapper(),
+      const _PaymentHistoryTabWrapper(),
       const DoctorProfileScreen(),
     ];
 
@@ -217,7 +222,7 @@ class _DoctorMainShellState extends State<DoctorMainShell>
                 ),
                 _DoctorNavItem(
                   icon: Icons.calendar_month_rounded,
-                  label: 'Appointments',
+                  label: 'Appmts',
                   isSelected: _currentIndex == 1,
                   selectedColor: selectedColor,
                   unselectedColor: unselectedColor,
@@ -233,12 +238,20 @@ class _DoctorMainShellState extends State<DoctorMainShell>
                   onTap: () => _onTabTapped(2),
                 ),
                 _DoctorNavItem(
-                  icon: Icons.person_rounded,
-                  label: 'Profile',
+                  icon: Icons.payments_rounded,
+                  label: 'Payments',
                   isSelected: _currentIndex == 3,
                   selectedColor: selectedColor,
                   unselectedColor: unselectedColor,
                   onTap: () => _onTabTapped(3),
+                ),
+                _DoctorNavItem(
+                  icon: Icons.person_rounded,
+                  label: 'Profile',
+                  isSelected: _currentIndex == 4,
+                  selectedColor: selectedColor,
+                  unselectedColor: unselectedColor,
+                  onTap: () => _onTabTapped(4),
                 ),
               ],
             ),
@@ -281,6 +294,31 @@ class _SlotsTabWrapper extends StatelessWidget {
   }
 }
 
+/// Loads the logged-in doctor's clinic payment rows for the doctor
+/// payment history tab (same doctor-scoped RLS path as the appointments
+/// screen).
+Future<List<PaymentModel>> _loadDoctorPayments() async {
+  final user = Get.find<AuthController>().currentUser.value;
+  final id = user?.id;
+  if (id == null) return const [];
+  final rows = await SupabaseService().getPaymentsForDoctor(id);
+  return rows.map((r) => PaymentModel.fromJson(r)).toList();
+}
+
+/// Wrapper widget that renders the doctor-flavoured payment history
+/// screen inside the bottom-nav IndexedStack.
+class _PaymentHistoryTabWrapper extends StatelessWidget {
+  const _PaymentHistoryTabWrapper();
+
+  @override
+  Widget build(BuildContext context) {
+    return const PaymentHistoryScreen(
+      subtitle: 'Fees collected at your clinic',
+      loadPayments: _loadDoctorPayments,
+    );
+  }
+}
+
 class _DoctorNavItem extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -307,7 +345,7 @@ class _DoctorNavItem extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           color: isSelected ? selectedColor.withAlpha(15) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
@@ -359,6 +397,8 @@ class _DoctorNavItem extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,

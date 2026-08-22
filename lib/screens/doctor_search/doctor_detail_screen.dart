@@ -4,8 +4,7 @@ import 'package:get/get.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../config/theme.dart';
 import '../../models/doctor_model.dart';
-import '../../models/doctor_slot_model.dart';
-import '../../models/unavailable_range.dart';
+
 import '../../services/launch_service.dart';
 import '../../services/places_service.dart';
 import '../../config/constants.dart';
@@ -13,7 +12,6 @@ import '../../services/share_service.dart';
 import '../../utils/extensions.dart';
 import '../../utils/snackbar_helpers.dart';
 import '../../widgets/doctor_avatar.dart';
-import '../../widgets/doctor_mini_map.dart';
 import '../../widgets/photo_gallery_card.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/doctor_controller.dart';
@@ -22,7 +20,7 @@ import '../../models/user_model.dart';
 import '../../routes/app_routes.dart';
 import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
-import '../../utils/time_slot_generator.dart';
+
 
 /// Modern, fully scrollable Doctor Detail screen with a parallax header,
 /// floating action buttons, and a sticky bottom bar.
@@ -62,11 +60,7 @@ class _DoctorDetailScreenState extends State<DoctorDetailScreen> {
   bool _detailsFailed = false;
   bool _isCollapsed = false;
 
-  /// Doctor-set unavailable date ranges (from the doctors table).
-  List<UnavailableRange> _unavailableRanges = const [];
 
-  /// The doctor's weekly availability slots (available time slots).
-  List<DoctorSlot> _weeklySlots = const [];
 
   @override
   void initState() {
@@ -74,42 +68,9 @@ class _DoctorDetailScreenState extends State<DoctorDetailScreen> {
     _doctor = _initialDoctor;
     _scrollController.addListener(_onScroll);
     _fetchDetails();
-    _loadAvailability();
   }
 
-  /// Fetches the doctor's availability from the DB: the unavailable date
-  /// ranges (doctors table) and the weekly slot schedule (doctor_slots) so
-  /// patients can see both in the profile and book accordingly.
-  Future<void> _loadAvailability() async {
-    try {
-      final dbDoctor = await SupabaseService().getDoctorFromDb(
-        _initialDoctor.placeId,
-      );
-      final slots = await SupabaseService().getDoctorSlots(
-        _initialDoctor.placeId,
-      );
-      if (mounted) {
-        setState(() {
-          _unavailableRanges =
-              dbDoctor?.unavailableRanges ?? const <UnavailableRange>[];
-          _weeklySlots = slots;
-          // Merge doctor-set fields from the DB row (upiId, availability)
-          // into the shown doctor — Places search never returns them, and
-          // the model is what gets passed to the booking screen when the
-          // patient taps Book Appointment.
-          if (dbDoctor != null) {
-            _doctor = DoctorController.mergeDoctorSetFields(
-              _doctor,
-              dbDoctor,
-              _doctor.userId,
-            );
-          }
-        });
-      }
-    } catch (_) {
-      // Non-fatal — the card just shows nothing when availability can't load.
-    }
-  }
+
 
   void _onScroll() {
     final collapsed =
@@ -139,11 +100,6 @@ class _DoctorDetailScreenState extends State<DoctorDetailScreen> {
             distance: _initialDoctor.distance,
             experienceYears: _initialDoctor.experienceYears,
             symptomsMap: _initialDoctor.symptomsMap,
-            // Preserve the DB-merged UPI VPA set by _loadAvailability —
-            // the Places model never carries it, and this setState can
-            // land after the availability merge (both start from
-            // initState, so ordering is not guaranteed).
-            upiId: _doctor.upiId,
           );
           _isLoading = false;
         });
@@ -266,9 +222,6 @@ class _DoctorDetailScreenState extends State<DoctorDetailScreen> {
                       // Identity block (name, specialization, location, stats)
                       _buildIdentityBlock(isDark),
                       const SizedBox(height: 24),
-                      // Quick Actions
-                      _QuickActionsRow(doctor: _doctor),
-                      const SizedBox(height: 20),
                       // Location Mini-Map
                       if (_doctor.latitude != null &&
                           _doctor.longitude != null) ...[
@@ -293,24 +246,7 @@ class _DoctorDetailScreenState extends State<DoctorDetailScreen> {
                       // Contact
                       _ContactCard(doctor: _doctor, isDark: isDark),
                       const SizedBox(height: 20),
-                      // UPI Payment ID — shown when the doctor has set a
-                      // receiving VPA (online consultation fees are paid
-                      // to this address in the booking flow). Hidden for
-                      // doctors without one — they collect at the clinic.
-                      if ((_doctor.upiId ?? '').trim().isNotEmpty) ...[
-                        _UpiIdCard(doctor: _doctor, isDark: isDark),
-                        const SizedBox(height: 20),
-                      ],
-                      // Availability — weekly slots + unavailable dates
-                      if (_unavailableRanges.isNotEmpty ||
-                          _weeklySlots.any((s) => s.isEnabled)) ...[
-                        _AvailabilityCard(
-                          isDark: isDark,
-                          unavailableRanges: _unavailableRanges,
-                          weeklySlots: _weeklySlots,
-                        ),
-                        const SizedBox(height: 20),
-                      ],
+
                       // Hours
                       if (_doctor.openingHours.isNotEmpty ||
                           _doctor.openingHoursPeriods.isNotEmpty) ...[
@@ -801,81 +737,7 @@ String _maskPhoneNumber(String? phone) {
 // ════════════════════════════════════════════════════════════════════
 // Quick actions row (Directions / Website — Call removed)
 // ════════════════════════════════════════════════════════════════════
-class _QuickActionsRow extends StatelessWidget {
-  final DoctorModel doctor;
-  const _QuickActionsRow({required this.doctor});
 
-  @override
-  Widget build(BuildContext context) {
-    final actions = <Widget>[
-      Expanded(
-        child: _QuickActionButton(
-          icon: Icons.directions,
-          label: 'Directions',
-          color: AppColors.info,
-          onTap: () => LaunchService.map(doctor.latitude, doctor.longitude),
-        ),
-      ),
-    ];
-    if ((doctor.website ?? '').isNotEmpty) {
-      actions.add(const SizedBox(width: 10));
-      actions.add(
-        Expanded(
-          child: _QuickActionButton(
-            icon: Icons.language,
-            label: 'Website',
-            color: AppColors.accent,
-            onTap: () => LaunchService.url(doctor.website),
-          ),
-        ),
-      );
-    }
-    return Row(children: actions);
-  }
-}
-
-class _QuickActionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _QuickActionButton({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: color.withAlpha(22),
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Column(
-            children: [
-              Icon(icon, size: 22, color: color),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════
 // Sticky bottom action bar (Directions / Book Appointment)
@@ -1616,6 +1478,29 @@ class _LocationMapCard extends StatelessWidget {
 
   const _LocationMapCard({required this.doctor, required this.isDark});
 
+  /// Builds a Google Static Map URL with a clean white/grey style.
+  String _staticMapUrl() {
+    final lat = doctor.latitude!;
+    final lng = doctor.longitude!;
+    final key = AppConstants.googleMapsApiKey;
+    return 'https://maps.googleapis.com/maps/api/staticmap'
+        '?center=$lat,$lng'
+        '&zoom=15'
+        '&size=600x280'
+        '&maptype=roadmap'
+        '&markers=color:red%7C$lat,$lng'
+        '&style=feature:all|element:labels|visibility:on'
+        '&style=feature:all|element:geometry|color:0xf0f0f0'
+        '&style=feature:water|color:0xc9e2f8'
+        '&style=feature:road|color:0xffffff'
+        '&style=feature:road.highway|color:0xe0e0e0'
+        '&style=feature:poi.park|color:0xd5e8d4'
+        '&style=feature:poi.medical|color:0xd5e8d4'
+        '&style=feature:landscape|color:0xf5f5f5'
+        '&style=feature:administrative|color:0xe8e8e8'
+        '&key=$key';
+  }
+
   @override
   Widget build(BuildContext context) {
     return _SectionCard(
@@ -1625,7 +1510,78 @@ class _LocationMapCard extends StatelessWidget {
         iconColor: AppColors.info,
         title: 'Location',
       ),
-      child: DoctorMiniMap(doctor: doctor),
+      child: Column(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.network(
+              _staticMapUrl(),
+              height: 180,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => Container(
+                height: 180,
+                decoration: BoxDecoration(
+                  color: AppColors.bgSecondarySurface,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.map_outlined,
+                    size: 48,
+                    color: AppColors.textCaption,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Address row
+          if ((doctor.address ?? '').isNotEmpty)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.location_on,
+                  size: 16,
+                  color: AppColors.info,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    doctor.address!,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? const Color(0xFFCCCCCC) : AppColors.textBody,
+                      height: 1.4,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          const SizedBox(height: 12),
+          // Directions button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => LaunchService.map(doctor.latitude, doctor.longitude),
+              icon: const Icon(Icons.directions, size: 18),
+              label: const Text('Get Directions'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.info.withAlpha(20),
+                foregroundColor: AppColors.info,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1887,70 +1843,7 @@ class _ContactCard extends StatelessWidget {
   }
 }
 
-/// Read-only UPI Payment ID card for the patient-facing doctor profile:
-/// shows the clinic's receiving UPI VPA (the address online consultation
-/// fees are paid to in the booking flow). Only rendered when the doctor
-/// has set one — no VPA means the patient pays at the clinic.
-class _UpiIdCard extends StatelessWidget {
-  final DoctorModel doctor;
-  final bool isDark;
-  const _UpiIdCard({required this.doctor, required this.isDark});
 
-  @override
-  Widget build(BuildContext context) {
-    final upiId = (doctor.upiId ?? '').trim();
-    if (upiId.isEmpty) return const SizedBox.shrink();
-
-    return _SectionCard(
-      isDark: isDark,
-      header: const _SectionHeader(
-        icon: Icons.account_balance_wallet_rounded,
-        iconColor: AppColors.primary,
-        title: 'UPI Payment ID',
-      ),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.primary.withAlpha(8),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: AppColors.primary.withAlpha(35),
-          ),
-        ),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.check_circle_rounded,
-              size: 18,
-              color: AppColors.primary,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                upiId,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : AppColors.textHeading,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Text(
-              'Pay here',
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.primary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _ContactTile extends StatelessWidget {
   final IconData icon;
@@ -2014,179 +1907,7 @@ class _ContactTile extends StatelessWidget {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Availability — weekly available time slots + doctor-set unavailable dates
-// ════════════════════════════════════════════════════════════════════
-class _AvailabilityCard extends StatelessWidget {
-  final bool isDark;
-  final List<UnavailableRange> unavailableRanges;
-  final List<DoctorSlot> weeklySlots;
 
-  const _AvailabilityCard({
-    required this.isDark,
-    required this.unavailableRanges,
-    required this.weeklySlots,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bodyColor = isDark ? const Color(0xFFCCCCCC) : AppColors.textBody;
-    const dayOrder = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday',
-    ];
-
-    // ── Available time slots: enabled weekly schedule per day ──
-    final dayChips = <Widget>[];
-    for (final day in dayOrder) {
-      final daySlots = weeklySlots
-          .where((s) => s.dayOfWeek == day && s.isEnabled && s.slots.isNotEmpty)
-          .toList();
-      if (daySlots.isEmpty) continue;
-      String? earliest24, latest24;
-      for (final s in daySlots) {
-        if (earliest24 == null || s.startTime.compareTo(earliest24) < 0) {
-          earliest24 = s.startTime;
-        }
-        if (latest24 == null || s.endTime.compareTo(latest24) > 0) {
-          latest24 = s.endTime;
-        }
-      }
-      if (earliest24 == null || latest24 == null) continue;
-      dayChips.add(
-        _AvailPill(
-          color: AppColors.success,
-          text:
-              '${day.substring(0, 3)}  ${to12h(earliest24)} – ${to12h(latest24)}',
-        ),
-      );
-    }
-
-    final hasActiveRanges = unavailableRanges.isNotEmpty;
-    return _SectionCard(
-      isDark: isDark,
-      header: _SectionHeader(
-        icon: hasActiveRanges
-            ? Icons.event_busy_rounded
-            : Icons.event_available_rounded,
-        iconColor: hasActiveRanges ? AppColors.error : AppColors.success,
-        title: 'Availability',
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Available time slots',
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: isDark
-                  ? Colors.white.withAlpha(190)
-                  : AppColors.textCaption,
-            ),
-          ),
-          const SizedBox(height: 10),
-          if (dayChips.isEmpty)
-            Text(
-              'No online slots configured yet.',
-              style: TextStyle(
-                fontSize: 12.5,
-                color: bodyColor.withAlpha(180),
-                fontStyle: FontStyle.italic,
-              ),
-            )
-          else
-            Wrap(spacing: 8, runSpacing: 8, children: dayChips),
-          const SizedBox(height: 18),
-          const Divider(height: 1),
-          const SizedBox(height: 14),
-          Text(
-            'Unavailable dates',
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: isDark
-                  ? Colors.white.withAlpha(190)
-                  : AppColors.textCaption,
-            ),
-          ),
-          const SizedBox(height: 10),
-          if (!hasActiveRanges)
-            Text(
-              'The doctor is currently taking bookings on all scheduled days.',
-              style: TextStyle(fontSize: 12.5, color: bodyColor.withAlpha(180)),
-            )
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: unavailableRanges
-                  .map(
-                    (r) => _AvailPill(
-                      color: AppColors.error,
-                      text: r.label,
-                      icon: Icons.event_busy_rounded,
-                    ),
-                  )
-                  .toList(),
-            ),
-          if (hasActiveRanges) ...[
-            const SizedBox(height: 10),
-            Text(
-              'Online booking is disabled on the dates above.',
-              style: TextStyle(
-                fontSize: 11.5,
-                color: AppColors.error.withAlpha(180),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// Small pill used in the availability card.
-class _AvailPill extends StatelessWidget {
-  final Color color;
-  final String text;
-  final IconData? icon;
-  const _AvailPill({required this.color, required this.text, this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withAlpha(12),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withAlpha(30)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 13, color: color),
-            const SizedBox(width: 5),
-          ],
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════
 // Working hours — real-time hours banner + detailed per-day schedule

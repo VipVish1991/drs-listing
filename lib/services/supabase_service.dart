@@ -116,10 +116,10 @@ class SupabaseService {
   }
 
   /// Register (or refresh) an FCM device token on the caller's own row.
-  /// Multi-device safe: the add_device_token RPC dedupes per token, so a
-  /// re-login refreshes instead of duplicating. Runs with the x-user-id
-  /// header context so the SECURITY DEFINER function can verify ownership
-  /// (same convention as the users UPDATE RLS policy).
+  /// Single-token: the add_device_token RPC replaces any existing token
+  /// with the new one (the array always contains exactly one entry).
+  /// Runs with the x-user-id header context so the SECURITY DEFINER
+  /// function can verify ownership.
   Future<void> addDeviceToken(
     String userId,
     String token, {

@@ -599,7 +599,8 @@ async function recordHistory(
   }
 }
 
-/// Remove a single stale device token from a user's device_tokens array
+/// Remove a stale device token from a user's device_tokens array.
+/// With single-token-per-user, this empties the array entirely.
 /// (service role — the user-gated RPC is for the app's own writes).
 async function pruneToken(
   supabase: any,

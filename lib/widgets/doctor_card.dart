@@ -62,23 +62,6 @@ class DoctorCard extends StatelessWidget {
     return withText.first;
   }
 
-  String get _statusLabel {
-    if (doctor.isOpen == true) return 'Open Now';
-    if (doctor.isOpen == false) return 'Closed';
-    if (doctor.businessStatus?.toLowerCase() == 'closed_temporarily') {
-      return 'Temp. Closed';
-    }
-    return '—';
-  }
-
-  Color get _statusColor {
-    if (doctor.isOpen == true) return Colors.green;
-    if (doctor.businessStatus?.toLowerCase() == 'closed_temporarily') {
-      return AppColors.warning;
-    }
-    return AppColors.textCaption;
-  }
-
   String get _priceIndicator {
     if (doctor.priceLevel == null) return '';
     return '₩' * (doctor.priceLevel! + 1);
@@ -231,6 +214,17 @@ class DoctorCard extends StatelessWidget {
                 child: Row(
                   children: [
                     _StatBlock(
+                      value: doctor.rating != null
+                          ? doctor.rating!.ratingString
+                          : '—',
+                      label: 'Rating',
+                    ),
+                    Container(
+                      width: 1,
+                      height: 28,
+                      color: AppColors.textCaption.withAlpha(60),
+                    ),
+                    _StatBlock(
                       value: '${doctor.userRatingsTotal ?? 0}',
                       label: 'Reviews',
                     ),
@@ -239,16 +233,18 @@ class DoctorCard extends StatelessWidget {
                       height: 28,
                       color: AppColors.textCaption.withAlpha(60),
                     ),
-                    _StatBlock(value: (doctor.distance ?? '—'), label: 'Away'),
+                    _StatBlock(
+                      value: doctor.experienceYears?.toString() ?? '—',
+                      label: 'Yrs Exp',
+                    ),
                     Container(
                       width: 1,
                       height: 28,
                       color: AppColors.textCaption.withAlpha(60),
                     ),
                     _StatBlock(
-                      value: _statusLabel,
-                      label: 'Status',
-                      valueColor: _statusColor,
+                      value: (doctor.distance ?? '—'),
+                      label: 'Away',
                     ),
                     if (_priceIndicator.isNotEmpty) ...[
                       Container(
@@ -275,6 +271,12 @@ class DoctorCard extends StatelessWidget {
                   text: doctor.address!,
                   color: bodyColor,
                   maxLines: 2,
+                ),
+              if ((doctor.phoneNumber ?? '').isNotEmpty)
+                _DetailRow(
+                  icon: Icons.phone_outlined,
+                  text: doctor.phoneNumber!,
+                  color: AppColors.success,
                 ),
               if ((doctor.website ?? '').isNotEmpty)
                 _DetailRow(
