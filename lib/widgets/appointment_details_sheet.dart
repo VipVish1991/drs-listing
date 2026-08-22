@@ -413,15 +413,14 @@ class AppointmentDetailsSheet {
                   ),
                 ),
               ],
-              // ── Join Tele Call (time-gated) ──
+              // ── Join Google Meet (time-gated) ──
               // Remote (video + tele/audio) consultations show a
-              // "Join Tele Call" button that is only enabled when the
+              // "Join Google Meet" button that is only enabled when the
               // appointment date/time has been reached. Before that,
               // a live countdown is displayed and tapping shows an
-              // info message. Google Meet video is disabled for tele
-              // consultations — the button opens the phone dialer
-              // instead. Hidden once the consultation is finished
-              // (Completed) or dropped (Cancelled).
+              // info message. Both tele and video consultations open
+              // the same Google Meet link. Hidden once the consultation
+              // is finished (Completed) or dropped (Cancelled).
               if (appointment.isRemoteConsultation &&
                   displayStatus != 'Cancelled' &&
                   displayStatus != 'Completed') ...[
@@ -723,7 +722,7 @@ class AppointmentPaymentCard extends StatelessWidget {
   }
 }
 
-/// Time-gated "Join Tele Call" button for remote consultations.
+/// Time-gated "Join Google Meet" button for remote consultations.
 ///
 /// Displays a live countdown until the appointment's scheduled date+time,
 /// then enables the join action. Tapping before the scheduled time shows
@@ -844,7 +843,6 @@ class _JoinTeleCallButtonState extends State<_JoinTeleCallButton> {
   @override
   Widget build(BuildContext context) {
     final a = widget.appointment;
-    final isTele = a.consultationType == 'tele';
 
     return SizedBox(
       width: double.infinity,
@@ -853,33 +851,16 @@ class _JoinTeleCallButtonState extends State<_JoinTeleCallButton> {
         key: const ValueKey('join_tele_call'),
         onPressed: _isTimeReached
             ? () async {
-                if (isTele) {
-                  // Tele: open phone dialer (Google Meet video disabled).
-                  // Use the resolved phone from the parent sheet so the
-                  // doctor side calls the patient (not the doctor's own
-                  // number stored as callNumber).
-                  final dialable = widget.phone ??
-                      a.callNumber ??
-                      a.patientPhone;
-                  if (dialable != null && dialable.isNotEmpty) {
-                    LaunchService.phone(dialable);
-                  } else {
-                    showInfoSnackbar(
-                      'No phone number available for this consultation.',
-                    );
-                  }
-                } else {
-                  // Video: keep the Google Meet flow.
-                  final ctx = Get.context;
-                  if (ctx == null) return;
-                  final result =
-                      await _joinVideoConsultation(ctx, a);
-                  if (result != null &&
-                      result['success'] == true &&
-                      result['link'] != null) {
-                    await widget.onSaveMeetLink
-                        ?.call(result['link'] as String);
-                  }
+                // Both tele and video open Google Meet link.
+                final ctx = Get.context;
+                if (ctx == null) return;
+                final result =
+                    await _joinVideoConsultation(ctx, a);
+                if (result != null &&
+                    result['success'] == true &&
+                    result['link'] != null) {
+                  await widget.onSaveMeetLink
+                      ?.call(result['link'] as String);
                 }
               }
             : () {
@@ -888,12 +869,12 @@ class _JoinTeleCallButtonState extends State<_JoinTeleCallButton> {
                   'on ${a.displayDate ?? ''}.',
                 );
               },
-        icon: Icon(
-          isTele ? Icons.phone_rounded : Icons.videocam_rounded,
+        icon: const Icon(
+          Icons.videocam_rounded,
           size: 18,
         ),
         label: Text(
-          _isTimeReached ? 'Join Tele Call' : _countdownLabel(),
+          _isTimeReached ? 'Join Google Meet' : _countdownLabel(),
           style: const TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w700,

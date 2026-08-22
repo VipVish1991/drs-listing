@@ -209,7 +209,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Video Consultation'), findsOneWidget);
-      // The chip's icon (the Join Tele Call button below adds its own).
+      // The chip's icon (the Join Google Meet button below adds its own).
       expect(
         find.descendant(
           of: find.byKey(
@@ -221,7 +221,7 @@ void main() {
       );
     });
 
-    testWidgets('video consultation shows the Join Tele Call button',
+    testWidgets('video consultation shows the Join Google Meet button',
         (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_BTN_1',
@@ -233,15 +233,15 @@ void main() {
 
       await _openSheet(tester, appointment);
 
-      // Remote consultations show the Join Tele Call button.
+      // Remote consultations show the Join Google Meet button.
       expect(
         find.byKey(const ValueKey('join_tele_call')),
         findsOneWidget,
       );
-      expect(find.text('Join Tele Call'), findsOneWidget);
+      expect(find.text('Join Google Meet'), findsOneWidget);
     });
 
-    testWidgets('tele (audio) consultation shows the Join Tele Call button',
+    testWidgets('tele (audio) consultation shows the Join Google Meet button',
         (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_BTN_2',
@@ -259,7 +259,7 @@ void main() {
       );
     });
 
-    testWidgets('in-clinic visits hide the Join Tele Call button', (
+    testWidgets('in-clinic visits hide the Join Google Meet button', (
       tester,
     ) async {
       final appointment = AppointmentModel(
@@ -276,10 +276,10 @@ void main() {
         find.byKey(const ValueKey('join_tele_call')),
         findsNothing,
       );
-      expect(find.text('Join Tele Call'), findsNothing);
+      expect(find.text('Join Google Meet'), findsNothing);
     });
 
-    testWidgets('legacy rows without a type hide the Join Tele Call button',
+    testWidgets('legacy rows without a type hide the Join Google Meet button',
         (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_BTN_4',
@@ -317,7 +317,7 @@ void main() {
       expect(find.text('https://meet.google.com/abc-def-ghi'), findsNothing);
     });
 
-    testWidgets('completed video consultations hide the Join Tele Call '
+    testWidgets('completed video consultations hide the Join Google Meet '
         'button', (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_DONE_1',
@@ -339,11 +339,11 @@ void main() {
         find.byKey(const ValueKey('join_tele_call')),
         findsNothing,
       );
-      expect(find.text('Join Tele Call'), findsNothing);
+      expect(find.text('Join Google Meet'), findsNothing);
       expect(find.text('https://meet.google.com/abc-def-ghi'), findsNothing);
     });
 
-    testWidgets('cancelled video consultations hide the Join Tele Call '
+    testWidgets('cancelled video consultations hide the Join Google Meet '
         'button', (tester) async {
       final appointment = AppointmentModel(
         appointmentId: 'APT_VC_CANCEL_1',
@@ -364,7 +364,7 @@ void main() {
         find.byKey(const ValueKey('join_tele_call')),
         findsNothing,
       );
-      expect(find.text('Join Tele Call'), findsNothing);
+      expect(find.text('Join Google Meet'), findsNothing);
       expect(find.text('https://meet.google.com/abc-def-ghi'), findsNothing);
     });
 
